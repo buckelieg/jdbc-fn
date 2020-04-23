@@ -1,6 +1,7 @@
 [![build](https://github.com/buckelieg/db-fn/workflows/build/badge.svg?branch=master)]()
 [![](https://img.shields.io/github/license/buckelieg/jdbc-fn.svg)](./LICENSE.md)
 [![](https://img.shields.io/maven-central/v/com.github.buckelieg/db-fn.svg)](http://mvnrepository.com/artifact/com.github.buckelieg/db-fn)
+[![javadoc](https://javadoc.io/badge2/com.github.buckelieg/db-fn/javadoc.svg)](https://javadoc.io/doc/com.github.buckelieg/db-fn)
 # jdbc-fn
 Functional style programming over plain JDBC.
 + Execute SQL SELECT query and process results with Java Stream API.
