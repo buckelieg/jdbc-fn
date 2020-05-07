@@ -44,7 +44,8 @@ final class Utils {
     static final String EXCEPTION_MESSAGE = "Unsupported operation";
     static final String STATEMENT_DELIMITER = ";";
     static final Pattern PARAMETER = Pattern.compile("\\?");
-    static final Pattern NAMED_PARAMETER = Pattern.compile(":\\w*\\B?");
+    private static final String NAMED_PARAMETER_TRAIL = "(?=(([^\"]*\"){2})*[^\"]*$)";
+    static final Pattern NAMED_PARAMETER = Pattern.compile(format("%s%s", "(:\\w*\\b)", NAMED_PARAMETER_TRAIL));
 
     // Java regexp does not support conditional regexps. We will enumerate all possible variants.
     static final Pattern STORED_PROCEDURE = Pattern.compile(format("%s|%s|%s|%s|%s|%s",
@@ -162,11 +163,12 @@ final class Utils {
         }
         for (Entry<String, Optional<?>> e : transformedParams.entrySet()) {
             query = query.replaceAll(
-                    e.getKey(),
+                    format("(%s\\b)%s", e.getKey(), NAMED_PARAMETER_TRAIL),
                     stream(asIterable(e.getValue()).spliterator(), false).map(o -> "?").collect(joining(","))
             );
         }
-        return new SimpleImmutableEntry<>(checkAnonymous(query), indicesToValues.values().toArray());
+//        return new SimpleImmutableEntry<>(checkAnonymous(query), indicesToValues.values().toArray());
+        return new SimpleImmutableEntry<>(query, indicesToValues.values().toArray());
     }
 
     @SuppressWarnings("all")

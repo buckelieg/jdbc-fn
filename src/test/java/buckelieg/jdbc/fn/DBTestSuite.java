@@ -32,8 +32,10 @@ import java.util.stream.Stream;
 import static buckelieg.jdbc.fn.Utils.cutComments;
 import static java.lang.Thread.currentThread;
 import static java.util.AbstractMap.SimpleImmutableEntry;
+import static java.util.Collections.singletonList;
 import static java.util.stream.Collectors.joining;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 
 // TODO more test suites for other RDBMS
@@ -383,8 +385,7 @@ public class DBTestSuite {
         DB db = new DB(() -> conn);
         db.select("SELECT * FROM TEST WHERE name IN (:names)", new SimpleImmutableEntry<>("names", new Integer[]{1, 2}))
                 .print(s -> assertEquals("SELECT * FROM TEST WHERE name IN (1,2)", s))
-                .execute().count()
-        ;
+                .execute().count();
         db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name", new SimpleImmutableEntry<>("name", "new_name_2"), new SimpleImmutableEntry<>("new_name", "name_2"))
                 .print(s -> assertEquals("UPDATE TEST SET NAME=new_name_2 WHERE NAME=name_2", s))
                 .execute();
@@ -500,6 +501,23 @@ public class DBTestSuite {
                 new SimpleImmutableEntry<>("? = call mySchema.mySchema.myPackage.myProc", false)
                 // TODO more cases here
         ).forEach(testCase -> assertEquals(String.format("Test case '%s' failed", testCase.getKey()), testCase.getValue(), Utils.STORED_PROCEDURE.matcher(testCase.getKey()).matches()));
+    }
+
+    @Test
+    public void testNamedParametersInStrings() throws Exception {
+        Map.Entry<String, Object[]> entry = Utils.prepareQuery("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(:ids1)", singletonList(new SimpleImmutableEntry<>("ids2", new int[]{1, 2, 3})));
+        assertEquals("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(:ids1)", entry.getKey());
+        entry = Utils.prepareQuery("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(:ids)", singletonList(new SimpleImmutableEntry<>("ids", new int[]{1, 2, 3})));
+        assertEquals("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(?,?,?)", entry.getKey());
+        entry = Utils.prepareQuery("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(:ids1)", singletonList(new SimpleImmutableEntry<>("ids1", new int[]{1, 2, 3})));
+        assertEquals("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(?,?,?)", entry.getKey());
+        entry = Utils.prepareQuery("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(:ids1)", Arrays.asList(
+                new SimpleImmutableEntry<>("ids1", new int[]{1, 2, 3}),
+                new SimpleImmutableEntry<>(":idss", new int[]{1, 2, 3})
+                )
+        );
+        assertEquals("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(?,?,?)", entry.getKey());
+        assertTrue(Utils.isAnonymous("SELECT 1 AS \":one\""));
     }
 
     @Test
