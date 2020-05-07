@@ -503,11 +503,9 @@ public class DBTestSuite {
         ).forEach(testCase -> assertEquals(String.format("Test case '%s' failed", testCase.getKey()), testCase.getValue(), Utils.STORED_PROCEDURE.matcher(testCase.getKey()).matches()));
     }
 
-    @Test
+    @Test(expected = IllegalArgumentException.class)
     public void testNamedParametersInStrings() throws Exception {
-        Map.Entry<String, Object[]> entry = Utils.prepareQuery("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(:ids1)", singletonList(new SimpleImmutableEntry<>("ids2", new int[]{1, 2, 3})));
-        assertEquals("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(:ids1)", entry.getKey());
-        entry = Utils.prepareQuery("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(:ids)", singletonList(new SimpleImmutableEntry<>("ids", new int[]{1, 2, 3})));
+        Map.Entry<String, Object[]> entry = Utils.prepareQuery("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(:ids)", singletonList(new SimpleImmutableEntry<>("ids", new int[]{1, 2, 3})));
         assertEquals("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(?,?,?)", entry.getKey());
         entry = Utils.prepareQuery("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(:ids1)", singletonList(new SimpleImmutableEntry<>("ids1", new int[]{1, 2, 3})));
         assertEquals("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(?,?,?)", entry.getKey());
@@ -518,6 +516,7 @@ public class DBTestSuite {
         );
         assertEquals("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(?,?,?)", entry.getKey());
         assertTrue(Utils.isAnonymous("SELECT 1 AS \":one\""));
+        entry = Utils.prepareQuery("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(:ids1)", singletonList(new SimpleImmutableEntry<>("ids2", new int[]{1, 2, 3})));
     }
 
     @Test

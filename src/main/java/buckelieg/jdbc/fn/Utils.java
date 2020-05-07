@@ -167,8 +167,7 @@ final class Utils {
                     stream(asIterable(e.getValue()).spliterator(), false).map(o -> "?").collect(joining(","))
             );
         }
-//        return new SimpleImmutableEntry<>(checkAnonymous(query), indicesToValues.values().toArray());
-        return new SimpleImmutableEntry<>(query, indicesToValues.values().toArray());
+        return new SimpleImmutableEntry<>(checkAnonymous(query), indicesToValues.values().toArray());
     }
 
     @SuppressWarnings("all")
