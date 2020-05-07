@@ -217,7 +217,7 @@ Queries.setConnection(conn);
 List<Map<String, Object>> names = Queries.list("SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry("ids", new long[]{1, 2, 3}));
 ```
 So that there are minimum efforts to obtain data from database.
-<br/><p>Note that connection must be closed explicitly after using <code>Queries</code> helper.</p>
+<br/>Note that connection must be closed explicitly after using <code>Queries</code> helper.
 ### Prerequisites
 Java8, Maven, Appropriate JDBC driver.
 
