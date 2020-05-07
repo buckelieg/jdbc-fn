@@ -27,8 +27,6 @@ import java.io.InputStreamReader;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.LogManager;
-import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 import static buckelieg.jdbc.fn.Utils.cutComments;
@@ -44,8 +42,6 @@ public class DBTestSuite {
     private static Connection conn;
     private static DB db;
     private static DataSource ds;
-    private static TrySupplier<Connection, SQLException> single;
-    static Logger LOG = LogManager.getLogManager().getLogger("test");
 
     @BeforeClass
     public static void init() throws Exception {
@@ -56,7 +52,7 @@ public class DBTestSuite {
         ds.setCreateDatabase("create");
         DBTestSuite.ds = ds;
         conn = ds.getConnection();
-        conn.createStatement().execute("CREATE TABLE TEST(id int PRIMARY KEY generated always as IDENTITY, name VARCHAR(255) NOT NULL)");
+        conn.createStatement().execute("CREATE TABLE TEST(id int PRIMARY KEY GENERATED ALWAYS AS IDENTITY, name VARCHAR(255) NOT NULL)");
         conn.createStatement().execute("CREATE PROCEDURE CREATETESTROW1(name_to_add VARCHAR(255)) DYNAMIC RESULT SETS 2 LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.createTestRow' PARAMETER STYLE JAVA");
         conn.createStatement().execute("CREATE PROCEDURE CREATETESTROW2(name_to_add VARCHAR(255)) LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testProcedure' PARAMETER STYLE JAVA");
         conn.createStatement().execute("CREATE PROCEDURE GETNAMEBYID(name_id INTEGER, OUT name_name VARCHAR(255)) LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testProcedureWithResults' PARAMETER STYLE JAVA");
@@ -152,7 +148,7 @@ public class DBTestSuite {
     @Test
     public void testSelectForEachSingle() throws Throwable {
         assertEquals(1, db.select("SELECT * FROM TEST WHERE ID=1").list().size());
-        db.select("SELECT COUNT(*) FROM TEST").execute(rs -> rs.getInt(1)).forEach(System.out::println);
+        db.select("SELECT COUNT(*) FROM TEST").stream(rs -> rs.getInt(1)).forEach(System.out::println);
     }
 
     @Test
@@ -353,10 +349,10 @@ public class DBTestSuite {
     public void testScriptWithNamedParameters() throws Exception {
         System.out.println(db.script(
                 "CREATE TABLE TEST1(id int PRIMARY KEY generated always as IDENTITY, name VARCHAR(255) NOT NULL);" +
-                "ALTER TABLE TEST1 ADD COLUMN surname VARCHAR(255);" +
-                "INSERT INTO TEST1(name, surname) VALUES (:name, :surname);" +
-                "DROP TABLE TEST1;" +
-                "{call GETALLNAMES()};",
+                        "ALTER TABLE TEST1 ADD COLUMN surname VARCHAR(255);" +
+                        "INSERT INTO TEST1(name, surname) VALUES (:name, :surname);" +
+                        "DROP TABLE TEST1;" +
+                        "{call GETALLNAMES()};",
                 new SimpleImmutableEntry<>("name", "Name"),
                 new SimpleImmutableEntry<>("surname", "SurName")
         ).print().verbose().timeout(1).errorHandler(System.err::println).execute());
@@ -406,16 +402,36 @@ public class DBTestSuite {
     }
 
     @Test
+    public void testUpdateWithGeneratedKeys() throws Exception {
+        Long id = db.update("INSERT INTO test(name) VALUES(?)", "name").print().execute(
+                rs -> rs.getLong(1),
+                keys -> db.select("SELECT * FROM test WHERE id=?", keys.max(Comparator.comparing(i -> i)).orElse(-1L)).print().single(rs -> rs.getLong(1))
+        ).orElse(0L);
+        assertEquals(11L, id.longValue());
+        id = db.update("INSERT INTO test(name) VALUES(?)", "name").print().execute(
+                rs -> rs.getLong(1),
+                keys -> db.select("SELECT * FROM test WHERE id=?", keys.max(Comparator.comparing(i -> i)).orElse(-1L)).print().single(rs -> rs.getLong(1)),
+                1
+        ).orElse(0L);
+        assertEquals(12L, id.longValue());
+        id = db.update("INSERT INTO test(name) VALUES(?)", "name").print().execute(
+                rs -> rs.getLong(1),
+                keys -> db.select("SELECT * FROM test WHERE id=?", keys.max(Comparator.comparing(i -> i)).orElse(-1L)).print().single(rs -> rs.getLong(1)),
+                "ID"
+        ).orElse(0L);
+        assertEquals(13L, id.longValue());
+    }
+
+    @Test
     public void testTransactions() throws Exception {
         Long result = db.transaction(false, TransactionIsolation.SERIALIZABLE, db ->
                 db.update("INSERT INTO test(name) VALUES(?)", "name")
                         .skipWarnings(false)
-                        .timeout(10, TimeUnit.MINUTES)
+                        .timeout(1, TimeUnit.MINUTES)
                         .print()
                         .execute(
                                 rs -> rs.getLong(1),
-                                keys -> db.select("SELECT * FROM test WHERE id=?", keys.max(Comparator.comparing(i -> i)).orElse(-1L)).print().single(rs -> rs.getLong(1)),
-                                1
+                                keys -> db.select("SELECT * FROM test WHERE id=?", keys.max(Comparator.comparing(i -> i)).orElse(-1L)).print().single(rs -> rs.getLong(1))
                         )
                         .orElse(null)
         );
@@ -493,7 +509,7 @@ public class DBTestSuite {
         assertEquals(10, Queries.callForList(conn, rs -> rs.getString(1), "call GETALLNAMES()").size());
         Queries.setConnection(conn);
         assertEquals(1, Queries.list("SELECT * FROM TEST WHERE 1=1 AND id=?", 1).size());
-        assertEquals(3, db.select("SELECT * FROM TEST WHERE 1=1 AND id IN (:ids)", new SimpleImmutableEntry<>("ids", new Integer[]{1, 2, 3})).print().list(rs -> rs.getString(2)).size());
+        assertEquals(3, Queries.list("SELECT * FROM TEST WHERE 1=1 AND id IN (:ids)", new SimpleImmutableEntry<>("ids", new int[]{1, 2, 3})).size());
         //TODO add more tests
     }
 

@@ -28,11 +28,11 @@ import java.util.Spliterator;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import static buckelieg.jdbc.fn.Utils.setStatementParameters;
 import static java.lang.Math.max;
 import static java.util.Objects.requireNonNull;
-import static java.util.stream.StreamSupport.stream;
 
 @SuppressWarnings("unchecked")
 @NotThreadSafe
@@ -84,7 +84,7 @@ class SelectQuery extends AbstractQuery<PreparedStatement> implements Iterable<R
     @Override
     public final <T> Stream<T> execute(TryFunction<ResultSet, T, SQLException> mapper) {
         requireNonNull(mapper, "Mapper must be provided");
-        return stream(jdbcTry(() -> {
+        return StreamSupport.stream(jdbcTry(() -> {
             connection.setAutoCommit(false);
             doExecute();
             if (rs != null) {

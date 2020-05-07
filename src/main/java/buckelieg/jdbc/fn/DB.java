@@ -22,7 +22,9 @@ import javax.annotation.concurrent.ThreadSafe;
 import javax.sql.DataSource;
 import java.io.File;
 import java.nio.charset.Charset;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -44,6 +46,7 @@ import static java.util.stream.Stream.of;
 /**
  * Database query factory
  *
+ * @see AutoCloseable
  * @see Query
  * @see Select
  * @see Update
@@ -94,8 +97,8 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Creates DB with connection supplier.<br/>
-     * This caches provided connection and tries to create new if previous one is closed.
+     * Creates DB with connection supplier.
+     * <br/>This caches provided connection and tries to create new if previous one is closed.
      *
      * @param connectionSupplier the connection supplier.
      * @throws NullPointerException if connection provider is null
@@ -116,8 +119,8 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Creates DB with provided <code>DataSource</code><br/>
-     * This will use <code>getConnection()</code> method to obtain a connection
+     * Creates DB with provided <code>DataSource</code>
+     * <br/>This will use <code>getConnection()</code> method to obtain a connection
      *
      * @param ds the DataSource
      * @see DataSource#getConnection()
@@ -142,9 +145,9 @@ public final class DB implements AutoCloseable {
 
 
     /**
-     * Executes an arbitrary parameterized SQL statement<br/>
-     * Parameter names are CASE SENSITIVE!<br/>
-     * So that :NAME and :name are two different parameters.
+     * Executes an arbitrary parameterized SQL statement
+     * <br/>Parameter names are CASE SENSITIVE!
+     * <br/>So that :NAME and :name are two different parameters.
      *
      * @param query           an SQL query to execute
      * @param namedParameters query named parameters. Parameter name in the form of :name
@@ -158,9 +161,9 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes an arbitrary SQL statement with named parameters.<br/>
-     * Parameter names are CASE SENSITIVE!<br/>
-     * So that :NAME and :name are two different parameters.
+     * Executes an arbitrary SQL statement with named parameters.
+     * <br/>Parameter names are CASE SENSITIVE!
+     * <br/>So that :NAME and :name are two different parameters.
      *
      * @param query           an arbitrary SQL query to execute
      * @param namedParameters query named parameters. Parameter name in the form of :name
@@ -269,10 +272,10 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Calls stored procedure.<br/>
-     * Parameter names are CASE SENSITIVE!<br/>
-     * So that :NAME and :name are two different parameters.<br/>
-     * Named parameters order must match parameters type of the procedure called.
+     * Calls stored procedure.
+     * <br/>Parameter names are CASE SENSITIVE!
+     * <br/>So that :NAME and :name are two different parameters.
+     * <br/>Named parameters order must match parameters type of the procedure called.
      *
      * @param query      procedure call string to execute
      * @param parameters procedure parameters as declared (IN/OUT/INOUT)
@@ -339,7 +342,7 @@ public final class DB implements AutoCloseable {
 
 
     /**
-     * Executes one of DML statements: INSERT, UPDATE or DELETE.
+     * Executes DML statements: INSERT, UPDATE or DELETE.
      *
      * @param query INSERT/UPDATE/DELETE query to execute
      * @param batch an array of query parameters on the declared order of '?'
@@ -352,7 +355,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid DML statement", query));
         }
-        return new UpdateQuery(connectionSupplier.get(), checkAnonymous(query), batch);
+        return new UpdateQueryDecorator(connectionSupplier.get(), checkAnonymous(query), batch);
     }
 
     /**
@@ -371,9 +374,9 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes SELECT statement.<br/>
-     * Parameter names are CASE SENSITIVE!<br/>
-     * So that :NAME and :name are two different parameters.
+     * Executes SELECT statement.
+     * <br/>Parameter names are CASE SENSITIVE!
+     * <br/>So that :NAME and :name are two different parameters.
      *
      * @param query           SELECT query to execute
      * @param namedParameters query named parameters. Parameter name in the form of :name
@@ -387,9 +390,9 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes SELECT statement with named parameters.<br/>
-     * Parameter names are CASE SENSITIVE!<br/>
-     * So that :NAME and :name are two different parameters.
+     * Executes SELECT statement with named parameters.
+     * <br/>Parameter names are CASE SENSITIVE!
+     * <br/>So that :NAME and :name are two different parameters.
      *
      * @param query           SELECT query to execute
      * @param namedParameters query named parameters. Parameter name in the form of :name
@@ -404,7 +407,7 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes one of DML statements: INSERT, UPDATE or DELETE.
+     * Executes statements: INSERT, UPDATE or DELETE.
      *
      * @param query INSERT/UPDATE/DELETE query to execute
      * @return update query
@@ -417,7 +420,7 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes one of DML statements: INSERT, UPDATE or DELETE.
+     * Executes statements: INSERT, UPDATE or DELETE.
      *
      * @param query      INSERT/UPDATE/DELETE query to execute
      * @param parameters query parameters on the declared order of '?'
@@ -431,9 +434,9 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes one of DML statements: INSERT, UPDATE or DELETE.<br/>
-     * Parameter names are CASE SENSITIVE!<br/>
-     * So that :NAME and :name are two different parameters.
+     * Executes statements: INSERT, UPDATE or DELETE.
+     * <br/>Parameter names are CASE SENSITIVE!
+     * <br/>So that :NAME and :name are two different parameters.
      *
      * @param query           INSERT/UPDATE/DELETE query to execute
      * @param namedParameters query named parameters. Parameter name in the form of :name
@@ -448,9 +451,9 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes one of DML statements: INSERT, UPDATE or DELETE.<br/>
-     * Parameter names are CASE SENSITIVE!<br/>
-     * So that :NAME and :name are two different parameters.
+     * Executes statements: INSERT, UPDATE or DELETE.
+     * <br/>Parameter names are CASE SENSITIVE!
+     * <br/>So that :NAME and :name are two different parameters.
      *
      * @param query INSERT/UPDATE/DELETE query to execute
      * @param batch an array of query named parameters. Parameter name in the form of :name
@@ -467,12 +470,12 @@ public final class DB implements AutoCloseable {
 
     /**
      *
-     * Creates a transaction for the set of an arbitrary statements with specified isolation level.<br/>
-     * Example usage:
+     * Creates a transaction for the set of an arbitrary statements with specified isolation level.
+     * <br/>Example usage:
      * <pre>{@code
      *  // suppose we have to create a bunch of new users with provided names and get the latest with all it's attributes filled in
      *  DB db = new DB("connectionUrl");
-     *  User latestUser = db.transaction(false, TransactionIsolation.READ_UNCOMMITTED, db ->
+     *  User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, db ->
      *      db.update("INSERT INTO users(name) VALUES(?)", "name1", "name2", "name3", ...)
      *        .skipWarnings(false)
      *        .timeout(10, TimeUnit.MINUTES)
@@ -487,16 +490,17 @@ public final class DB implements AutoCloseable {
      *                              u.setName(rs.getString("name"));
      *                              //... fill other user's attributes...
      *                              return user;
-     *                          }).orElse(null);
+     *                          })
      *                  );
-     *          );
+     *          )
+     *          .orElse(null);
      * }</pre>
      * Note that return value must not be an opened cursor, so that code below will throw an exception of Invalid transaction state - held cursor requires same isolation level:
      * <pre>{@code Stream<String> stream = db.transaction(false, TransactionIsolation.SERIALIZABLE, db -> db.select("SELECT * FROM my_table").execute(rs -> rs.getString(1)));
      * stream.collect(Collectors.toList());}</pre>
      * Unless desired isolation level matches the RDBMS default one.
      *
-     * @param createNew whether to create new transaction (implies obtaining new connection) or not.
+     * @param createNew whether to create new transaction (implies obtaining new connection if possible) or not.
      * @param level transaction isolation level (null -> default)
      * @param action an action to be performed in transaction
      * @return an arbitrary result
@@ -516,7 +520,7 @@ public final class DB implements AutoCloseable {
     /**
      * Creates a transaction for the set of an arbitrary statements with default isolation level.
      *
-     * @param createNew whether to create new transaction (implies getting new connection) or not.
+     * @param createNew whether to create new transaction (implies getting new connection if possible) or not.
      * @param action an action to be performed in transaction
      * @return an arbitrary result
      * @throws NullPointerException if no action is provided

@@ -32,7 +32,6 @@ import static buckelieg.jdbc.fn.Utils.*;
 import static java.sql.Statement.RETURN_GENERATED_KEYS;
 import static java.util.Arrays.stream;
 import static java.util.Objects.requireNonNull;
-import static java.util.stream.Collectors.joining;
 import static java.util.stream.Stream.of;
 
 @SuppressWarnings("unchecked")
@@ -47,19 +46,26 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
     private boolean isEscaped = true;
     private int timeout;
     private TimeUnit unit = TimeUnit.SECONDS;
+    private final String sql;
 
-    private UpdateQuery(TrySupplier<PreparedStatement, SQLException> prepareStatement, Connection connection, String query, Object[]... batch) {
+    private UpdateQuery(String sqlString, TrySupplier<PreparedStatement, SQLException> prepareStatement, Connection connection, String query, Object[]... batch) {
         super(connection, query, (Object) batch);
-        this.batch = requireNonNull(batch, "Batch must be provided");
-        this.statement = jdbcTry(prepareStatement);
+        this.batch = batch;
+        try {
+            this.statement = prepareStatement.get();
+        } catch (SQLException e) {
+            throw newSQLRuntimeException(e);
+        }
+        this.sql = sqlString;
     }
 
-    UpdateQuery(Connection connection, String query, Object[]... batch) {
-        this(() -> connection.prepareStatement(query), connection, query, batch);
+    UpdateQuery(String sqlString, Connection connection, String query, Object[]... batch) {
+        this(sqlString, () -> connection.prepareStatement(query), connection, query, batch);
     }
 
-    private UpdateQuery(@Nullable int[] colIndices, Connection connection, String query, Object[]... batch) {
+    UpdateQuery(String sqlString, @Nullable int[] colIndices, Connection connection, String query, Object[]... batch) {
         this(
+                sqlString,
                 () -> colIndices == null || colIndices.length == 0 ?
                         connection.prepareStatement(query, RETURN_GENERATED_KEYS) :
                         connection.prepareStatement(query, colIndices),
@@ -67,8 +73,9 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
         );
     }
 
-    private UpdateQuery(@Nullable String[] colNames, Connection connection, String query, Object[]... batch) {
+    UpdateQuery(String sqlString, @Nullable String[] colNames, Connection connection, String query, Object[]... batch) {
         this(
+                sqlString,
                 () -> colNames == null || colNames.length == 0 ?
                         connection.prepareStatement(query, RETURN_GENERATED_KEYS) :
                         connection.prepareStatement(query, colNames),
@@ -132,13 +139,13 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
     @Nonnull
     @Override
     public <T, K> T execute(TryFunction<ResultSet, K, SQLException> valueMapper, TryFunction<Stream<K>, T, SQLException> generatedValuesHandler, String... colNames) {
-        return execute(null, colNames, valueMapper, generatedValuesHandler);
+        return execute(valueMapper, generatedValuesHandler);
     }
 
     @Nonnull
     @Override
     public <T, K> T execute(TryFunction<ResultSet, K, SQLException> valueMapper, TryFunction<Stream<K>, T, SQLException> generatedValuesHandler, int... colIndices) {
-        return execute(colIndices, null, valueMapper, generatedValuesHandler);
+        return execute(valueMapper, generatedValuesHandler);
     }
 
     /**
@@ -190,15 +197,7 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
 
     @Override
     final String asSQL(String query, Object... params) {
-        return stream(params)
-                .flatMap(p -> of((Object[]) p))
-                .map(p -> super.asSQL(query, (Object[]) p))
-                .collect(joining(STATEMENT_DELIMITER));
+        return sql;
     }
 
-    // TODO rewrite class to eliminate unnecessary object creation
-    private <T, K> T execute(@Nullable int[] colIndices, @Nullable String[] colNames, TryFunction<ResultSet, K, SQLException> mapper, TryFunction<Stream<K>, T, SQLException> generatedValuesHandler) {
-        close(); //close current prepared statement as we need to prepare new one with generated column names or indices provided
-        return (colIndices == null || colIndices.length == 0 ? new UpdateQuery(colNames, connection, query, batch) : new UpdateQuery(colIndices, connection, query, batch)).timeout(timeout).poolable(isPoolable).escaped(isEscaped).batched(isBatch).large(isLarge).skipWarnings(skipWarnings).execute(mapper, generatedValuesHandler);
-    }
 }

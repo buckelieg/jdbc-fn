@@ -15,29 +15,54 @@
  */
 package buckelieg.jdbc.fn;
 
+/**
+ * Represents a {@link RuntimeException} wrapper for {@link java.sql.SQLException}
+ *
+ * @see java.sql.SQLException
+ * @see RuntimeException
+ */
 public class SQLRuntimeException extends RuntimeException {
 
     private String message;
 
+    /**
+     * {@inheritDoc}
+     */
     public SQLRuntimeException() {
         super();
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public SQLRuntimeException(String message) {
         super(message);
     }
 
-    public SQLRuntimeException(String message, boolean fillStackTrace) {
+    /**
+     * Constructs a new runtime exception with provided string as its detail message.
+     * <br/>If <code>fillInStackTrace</code> parameter is set to <code>true</code> then stack trace is filled in, otherwise - not.
+     *
+     * @param message exception message string
+     * @param fillInStackTrace whether to fill in stack trace or not
+     */
+    public SQLRuntimeException(String message, boolean fillInStackTrace) {
         this.message = message;
-        if (fillStackTrace) {
+        if (fillInStackTrace) {
             fillInStackTrace();
         }
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public SQLRuntimeException(String message, Throwable cause) {
         super(message, cause);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     public SQLRuntimeException(Throwable cause) {
         super(cause);
     }

@@ -17,7 +17,6 @@ package buckelieg.jdbc.fn;
 
 import javax.annotation.Nonnull;
 import javax.annotation.ParametersAreNonnullByDefault;
-import java.io.PrintStream;
 import java.sql.CallableStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -35,12 +34,10 @@ import static java.util.Optional.ofNullable;
 public interface StoredProcedure extends Select {
 
     /**
-     * Calls procedure for results processing which are expected in the OUT/INOUT parameters.<br/>
-     * If registered - these will be invoked AFTER result set is iterated over.<br/>
-     * If the result set is not iterated exhaustively - mapper and (then) consumer will NOT be invoked.<br/>
-     * <p>
-     * The logic of this is to call mapper for creating result and the call consumer to process it.
-     * </p>
+     * Calls procedure for results processing which are expected in the OUT/INOUT parameters.
+     * <br/>If registered - these will be invoked AFTER result set is iterated over.
+     * <br/>If the result set is not iterated exhaustively - mapper and (then) consumer will NOT be invoked.
+     * <br/>The logic of this is to call mapper for creating result and the call consumer to process it.
      *
      * @param mapper   function for procedure call results processing
      * @param consumer mapper result consumer - will be called after mapper is finished
@@ -87,20 +84,13 @@ public interface StoredProcedure extends Select {
     StoredProcedure skipWarnings(boolean skipWarnings);
 
     /**
-     * Prints this query string to provided logger.
-     *
-     * @param printer query string consumer
-     * @return stored procedure abstraction
+     * {@inheritDoc}
      */
     @Nonnull
     StoredProcedure print(Consumer<String> printer);
 
     /**
-     * Prints this query string to standard output.
-     *
-     * @return stored procedure abstraction
-     * @see System#out
-     * @see PrintStream#println
+     * {@inheritDoc}
      */
     @Nonnull
     default StoredProcedure print() {

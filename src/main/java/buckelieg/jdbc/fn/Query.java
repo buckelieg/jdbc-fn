@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * An SQL query abstraction.
+ * An abstraction for arbitrary SQL query.
  *
  * @see AutoCloseable
  * @see Select
@@ -53,7 +53,8 @@ public interface Query extends AutoCloseable {
     Query poolable(boolean poolable);
 
     /**
-     * Sets query execution timeout. Negative values are silently ignored.
+     * Sets query execution timeout.
+     * <br/>Negative values are silently ignored.
      *
      * @param timeout query timeout in seconds greater than 0 (0 means no timeout)
      * @return a query abstraction
@@ -65,8 +66,9 @@ public interface Query extends AutoCloseable {
     }
 
     /**
-     * Sets query execution timeout. Negative values are silently ignored.<br/>
-     * TimeUnit is converted to seconds.
+     * Sets query execution timeout.
+     * <br/>Negative values are silently ignored.
+     * <br/>TimeUnit is converted to seconds.
      *
      * @param timeout query timeout in seconds greater than 0 (0 means no timeout)
      * @param unit a time unit
@@ -89,8 +91,8 @@ public interface Query extends AutoCloseable {
 
 
     /**
-     * Sets flag whether to skip on warnings or not.<br/>
-     * Default is <code>true</code>
+     * Sets flag whether to skip on warnings or not.
+     * <br/>Default is <code>true</code>
      *
      * @param skipWarnings true if to skip warning, false - otherwise.
      * @return a query abstraction
@@ -110,7 +112,7 @@ public interface Query extends AutoCloseable {
     /**
      * Prints this query string (as SQL) to standard output.
      *
-     * @return select query abstraction
+     * @return a query abstraction
      * @see System#out
      * @see PrintStream#println
      */
@@ -120,8 +122,8 @@ public interface Query extends AutoCloseable {
     }
 
     /**
-     * Represents this <code>query</code> AS <code>SQL</code> string.<br/>
-     * All parameters are substituted by calling theirs' <code>toString()</code> methods.
+     * Represents this <code>query</code> AS <code>SQL</code> string.
+     * <br/>All parameters are substituted by calling theirs' <code>toString()</code> methods.
      *
      * @return this query as a SQL string
      */

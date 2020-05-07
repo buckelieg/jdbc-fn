@@ -1,24 +1,26 @@
 /*
  * Copyright 2016- Anatoly Kutyakov
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*    http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package buckelieg.jdbc.fn;
 
 import static java.util.Objects.requireNonNull;
 
 /**
- * Single argument function with returned result that might throw an exception
+ * One-argument function which returns a result that might throw an exception
+ * <br/>There is no requirement that a new or distinct result be returned each time the function is invoked.
+ * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #apply(Object)}}.
  *
  * @param <I> argument type
  * @param <O> result type
@@ -29,7 +31,7 @@ import static java.util.Objects.requireNonNull;
 public interface TryFunction<I, O, E extends Throwable> {
 
     /**
-     * Represents some one-argument function which might throw an Exception
+     * Represents some one-argument function that might throw an Exception
      *
      * @param input function input.
      * @return mapped value
@@ -49,7 +51,7 @@ public interface TryFunction<I, O, E extends Throwable> {
 
     /**
      * Returns reference of lambda expression.
-     * Typical usage is:
+     * Typical usage is:<br/>
      * {@code TryFunction.of(x -> null).andThen(nil -> null);}
      *
      * @param tryFunction a function

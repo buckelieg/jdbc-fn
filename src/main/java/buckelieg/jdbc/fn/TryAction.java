@@ -18,7 +18,8 @@ package buckelieg.jdbc.fn;
 import static java.util.Objects.requireNonNull;
 
 /**
- * An arbitrary action that might throw an exception
+ * No-argument function which return no result that might throw an exception.
+ * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #doTry()}}.
  *
  * @param <E> exception type
  */
@@ -36,7 +37,7 @@ public interface TryAction<E extends Throwable> {
     /**
      * Returns reference of lambda expression.
      *
-     * @param tryAction an action
+     * @param tryAction an action function
      * @return {@link TryAction} reference
      * @throws NullPointerException if tryAction is null
      */
@@ -68,6 +69,7 @@ public interface TryAction<E extends Throwable> {
             throw (E) t;
         }
     }
+
     /**
      * Returns a composed {@code TryAction} that performs, in sequence, this<br/>
      * operation is preceded by the {@code before} operation. If performing either<br/>

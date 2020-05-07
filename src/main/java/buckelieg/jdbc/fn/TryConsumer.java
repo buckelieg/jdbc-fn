@@ -18,8 +18,8 @@ package buckelieg.jdbc.fn;
 import static java.util.Objects.requireNonNull;
 
 /**
- * Represents an operation that accepts a single input argument and returns no
- * result with an optional exception.
+ * One-argument function which returns no result that might throw an exception.
+ * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #accept(Object)}.
  *
  * @param <T> the type of the input to the operation
  * @param <E> the type of the possible exception

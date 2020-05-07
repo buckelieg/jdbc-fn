@@ -1,7 +1,7 @@
-[![build](https://github.com/buckelieg/db-fn/workflows/build/badge.svg?branch=master)]()
-[![](https://img.shields.io/github/license/buckelieg/jdbc-fn.svg)](./LICENSE.md)
-[![](https://img.shields.io/maven-central/v/com.github.buckelieg/db-fn.svg)](http://mvnrepository.com/artifact/com.github.buckelieg/db-fn)
-[![javadoc](https://javadoc.io/badge2/com.github.buckelieg/db-fn/javadoc.svg)](https://javadoc.io/doc/com.github.buckelieg/db-fn)
+[![build](https://github.com/buckelieg/jdbc-fn/workflows/build/badge.svg?branch=master)]()
+[![license](https://img.shields.io/github/license/buckelieg/jdbc-fn.svg)](./LICENSE.md)
+[![dist](https://img.shields.io/maven-central/v/com.github.buckelieg/jdbc-fn.svg)](http://mvnrepository.com/artifact/com.github.buckelieg/jdbc-fn)
+[![javadoc](https://javadoc.io/badge2/com.github.buckelieg/jdbc-fn/javadoc.svg)](https://javadoc.io/doc/com.github.buckelieg/jdbc-fn)
 # jdbc-fn
 Functional style programming over plain JDBC.
 + Execute SQL SELECT query and process results with Java Stream API.
@@ -17,7 +17,7 @@ Add maven dependency:
 <dependency>
   <groupId>com.github.buckelieg</groupId>
   <artifactId>jdbc-fn</artifactId>
-  <version>0.3.10</version>
+  <version>0.3.11</version>
 </dependency>
 ```
 
@@ -110,7 +110,6 @@ long res = db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{ {"name1
 ```java
 long res = db.update("DELETE FROM TEST WHERE name=?", "name_2").execute();
 ```
-and so on. Explore test suite for more examples.
 
 #### Stored Procedures
 Invoking stored procedures is also quite simple:
@@ -118,7 +117,7 @@ Invoking stored procedures is also quite simple:
 String name = db.procedure("{call GETNAMEBYID(?,?)}", P.in(12), P.out(JDBCType.VARCHAR)).call(cs -> cs.getString(2)).orElse("Unknown");
 ```
 Note that in the latter case stored procedure must not return any result sets.
-If stored procedure is considered to return result sets it is handled similar to regular selects (see above).
+<br/>If stored procedure is considered to return result sets it is handled similar to regular selects (see above).
 
 ### Scripts
 There are two options to run an arbitrary SQL scripts:
@@ -131,15 +130,15 @@ db.script("CREATE TABLE TEST (id INTEGER NOT NULL, name VARCHAR(255));INSERT INT
 ```java
   db.script(new File("path/to/script.sql")).timeout(60).execute();
 ```
-Script can contain single- and multiline commtents. Each statement must be separated by semicolon (";").
-Script execution results are ignored and not handled after all.
+<br/>Script can contain single- and multiline comments. Each statement must be separated by semicolon (";").
+<br/>Script execution results ignored and not handled after all.
 
 Note that scripts support named parameters and JDBC-like procedure call statements.
 
 ### Transactions
 There are couple of methods provide transaction support.
-Tell whether to create new transaction or not, provide isolation level and transaction logic function.
-See example below.
+<br/>Tell whether to create new transaction or not, provide isolation level and transaction logic function.
+<br/>See example below.
 ```java
 // suppose we have to insert a bunch of new users by name and get the latest one filled with its attributes....
 User latestUser = db.transaction(false, TransactionIsolation.READ_UNCOMMITTED, db ->
@@ -162,21 +161,66 @@ User latestUser = db.transaction(false, TransactionIsolation.READ_UNCOMMITTED, d
     .orElse(null)
 );
 ```
-
-#### ETL
-implement simple ETL process:
+### Logging & Debugging
+Convenient logging methods provided.
 ```java
-ExecutorService pool = Executors.newCachedThreadPool();
-long count = db.select("SELECT COUNT(*) FROM TEST").single(rs -> rs.getLong(1)).orElse(0L);
-// calculate partitions here and split work to threads if needed
-for(long[] chunk : chunks) {
-  pool.submit(() -> db.select(" SELECT * FROM TEST WHERE 1=1 AND ID>? AND ID<?", chunk[0], chunk[1]).execute(rs -> {/*map rs here*/}).forEach(obj -> {/* do things here...*/}));
-}
+Logger LOG = ... // configure logger
+db.select("SELECT * FROM TEST WHERE id=?", 7).print(LOG::debug).list(rs -> {/*map rs here*/});
 ```
+The above will print a current query to provided logger with debug method.
+<br/>Note that all provided parameters will be substituted with corresponding values so this case will output:
+<br/><code>SELECT * FROM TEST WHERE id=7</code>
+<br/>Calling <code>print()</code> without arguments will do the same with standard output.
+#### Scripts logging
+For <code>Script</code> query <code>verbose()</code> method can be used to track current script query execution.
+```java
+db.script("SELECT * FROM TEST WHERE id=:id;DROP TABLE TEST", new SimpleImmutableEntry<>("id", 5)).verbose().execute();
+```
+This will print out to standard output two lines:
+<br/><code>SELECT * FROM TEST WHERE id=5</code>
+<br/><code>DROP TABLE TEST</code>
+<br/>Each line will be appended to output at the moment of execution.
+<br/>Calling <code>print()</code> on <code>Script</code> will print out the whole sql script with parameters substituted.
+<br/>Custom logging handler may also be provided for both cases.
 
+### Going simpler
+For cases when it is all about query execution on existing connection with no tuning, logging and other stuff the <code>Queries</code> helper class can be used.
+<br/>For example:
+```java
+Connection conn = ... // somewhere previously created connection
+List<String> names = Queries.list(conn, rs -> rs.getString("name"), "SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry("ids", new long[]{1, 2, 3}));
+```
+There are plenty of pre-defined cases implemented:
+<br/><code>list</code> - for list selection 
+<br/><code>single</code> - for single object selection, 
+<br/><code>callForList</code> - calling <code>StoredProcedure</code> which returns a <code>ResultSet</code>,
+<br/><code>call</code> - call a <code>StoredProcedure</code> either with results or without,
+<br/><code>update</code> - to execute various updates,
+<br/><code>execute</code> - to execute atomic queries and/or scripts
+#### ...even simpler
+There is an option to set up the connection with helper class to reduce a number of method arguments:
+```java
+Connection conn = ... // somewhere previously created connection
+Queries.setConnection(conn);
+// all subsequent calls will be done on connection set.
+List<String> names = Queries.list(rs -> rs.getString("name"), "SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry("ids", new long[]{1, 2, 3}));
+List<String> names = Queries.callForList(rs -> rs.getString(1), "{call GETALLNAMES()}");
+```
+#### ...even simplest...
+with built-in mapper functionality.
+<br/>All <code>Select</code> query methods which takes a <code>mapper</code> function has a companion one without.
+<br/> Calling that <code>mapper</code>-less methods will imply mapping a tuple as <code>String</code> alias to <code>Object</code> value.
+<br/>For example:
+```java
+Connection conn = ... // somewhere previously created connection
+Queries.setConnection(conn);
+List<Map<String, Object>> names = Queries.list("SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry("ids", new long[]{1, 2, 3}));
+```
+So that there are minimum efforts to obtain data from database.
+<br/><p>Note that connection must be closed explicitly after using <code>Queries</code> helper.</p>
 ### Prerequisites
-Java8, Maven.
+Java8, Maven, Appropriate JDBC driver.
 
 ## License
-This project is licensed under Apache License, Version 2.0 - see the [LICENSE.md](LICENSE.md) file for details
+This project licensed under Apache License, Version 2.0 - see the [LICENSE.md](LICENSE.md) file for details
 

@@ -26,11 +26,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static buckelieg.jdbc.fn.Utils.defaultMapper;
 import static java.util.Objects.requireNonNull;
 
 /**
- * Helper class which simplifies common JDBC scenarios
+ * Helper class which simplifies common JDBC scenarios.
+ * <br/>The simplest usage implies to set a connection:
+ * <br/><pre>{@code Connection conn = ...;
+ * Queries.setConnection(conn);
+ * List<String> list = Queries.list(rs -> rs.getString("name"), "SELECT name FROM my_table");}</pre>
+ * Note that connection remains opened after execution and it must be closed explicitly.
  */
 @ParametersAreNonnullByDefault
 public final class Queries {
@@ -52,6 +56,7 @@ public final class Queries {
      * @param mapper <code>{@link ResultSet}</code> to value mapper
      * @param query  a query to execute against provided connection
      * @param params query parameters (if any)
+     * @param <T> result parameter type
      * @return a <code>{@link List}</code> of mapped values.
      */
     @Nonnull
@@ -60,12 +65,13 @@ public final class Queries {
     }
 
     /**
-     * Obtains a <code>{@link List}</code> of values from previously provided connection.<br/>
-     * The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Obtains a <code>{@link List}</code> of values from previously provided connection.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
      *
      * @param mapper <code>{@link ResultSet}</code> to value mapper
-     * @param query  a query to execute against provided connection
+     * @param query  a query to execute against previously provided connection
      * @param params query parameters (if any)
+     * @param <T> result parameter type
      * @return a <code>{@link List}</code> of mapped values.
      */
     @Nonnull
@@ -74,29 +80,87 @@ public final class Queries {
     }
 
     /**
-     * Obtains a <code>{@link List}</code> of Maps from provided connection.
+     * Obtains a <code>{@link List}</code> of {@link Map}s from provided connection.
      *
      * @param conn   connection to a database
      * @param query  a query to execute against provided connection
      * @param params query parameters (if any)
-     * @return a <code>{@link List}</code> of maps.
+     * @return a <code>{@link List}</code> of {@link Map}s.
      */
     @Nonnull
     public static List<Map<String, Object>> list(Connection conn, String query, Object... params) {
-        return list(conn, new Utils.DefaultMapper(), query, params);
+        return new DB(conn).select(query, params).list();
     }
 
     /**
-     * Obtains a <code>{@link List}</code> of Maps from previously provided connection.<br/>
-     * The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
      *
-     * @param query  a query to execute against provided connection
+     * @param query  a query to execute against previously provided connection
      * @param params query parameters (if any)
-     * @return a <code>{@link List}</code> of maps.
+     * @return a <code>{@link List}</code> of {@link Map}s.
      */
     @Nonnull
     public static List<Map<String, Object>> list(String query, Object... params) {
-        return list(new Utils.DefaultMapper(), query, params);
+        return db().select(query, params).list();
+    }
+
+    /**
+     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     *
+     * @param mapper <code>{@link ResultSet}</code> to value mapper
+     * @param query a query to execute against previously provided connection
+     * @param params query parameters (if any)
+     * @param <T> result parameter type
+     * @return a <code>{@link List}</code> of mapped values.
+     */
+    @Nonnull
+    public static <T> List<T> list(TryFunction<ResultSet, T, SQLException> mapper, String query, Map<String, ?> params) {
+        return db().select(query, params).list(mapper);
+    }
+
+    /**
+     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     *
+     * @param query a query to execute against previously provided connection
+     * @param params query parameters (if any)
+     * @return a <code>{@link List}</code> of {@link Map}s.
+     */
+    @Nonnull
+    public static List<Map<String, Object>> list(String query, Map<String, ?> params) {
+        return db().select(query, params).list();
+    }
+
+    /**
+     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     *
+     * @param mapper <code>{@link ResultSet}</code> to value mapper
+     * @param query a query to execute against previously provided connection
+     * @param params query parameters (if any)
+     * @param <T> result parameter type
+     * @return a <code>{@link List}</code> of mapped values.
+     */
+    @SafeVarargs
+    @Nonnull
+    public static <T, P extends Map.Entry<String, ?>> List<T> list(Connection conn, TryFunction<ResultSet, T, SQLException> mapper, String query, P... params) {
+        return db().select(query, params).list(mapper);
+    }
+
+    /**
+     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     *
+     * @param query a query to execute against previously provided connection
+     * @param params query parameters (if any)
+     * @return a <code>{@link List}</code> of {@link Map}s.
+     */
+    @SafeVarargs
+    @Nonnull
+    public static <T extends Map.Entry<String, ?>> List<Map<String, Object>> list(String query, T... params) {
+        return db().select(query, params).list();
     }
 
     /**
@@ -114,8 +178,8 @@ public final class Queries {
     }
 
     /**
-     * Obtains a single value from previously provided connection.<br/>
-     * The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Obtains a single value from previously provided connection.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
      *
      * @param mapper <code>{@link ResultSet}</code> to value mapper
      * @param query  a query to execute against provided connection
@@ -137,12 +201,12 @@ public final class Queries {
      */
     @Nonnull
     public static Optional<Map<String, Object>> single(Connection conn, String query, Object... params) {
-        return single(conn, defaultMapper, query, params);
+        return new DB(conn).select(query, params).single();
     }
 
     /**
-     * Obtains a single value from previously provided connection.<br/>
-     * The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Obtains a single value from previously provided connection.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
      *
      * @param query  a query to execute against provided connection
      * @param params query parameters (if any)
@@ -150,7 +214,7 @@ public final class Queries {
      */
     @Nonnull
     public static Optional<Map<String, Object>> single(String query, Object... params) {
-        return single(defaultMapper, query, params);
+        return db().select(query, params).single();
     }
 
     /**
@@ -161,19 +225,19 @@ public final class Queries {
      * @param params query parameters (if any)
      * @return affected rows count
      */
-    public static long update(Connection conn, String query, Object params) {
+    public static long update(Connection conn, String query, Object... params) {
         return new DB(conn).update(query, params).execute();
     }
 
     /**
-     * Executes provided DML statement on the previously provided connection.<br/>
-     * The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Executes provided DML statement on the previously provided connection.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
      *
      * @param query  a DML query to execute against provided connection
      * @param params query parameters (if any)
      * @return affected rows count
      */
-    public static long update(String query, Object params) {
+    public static long update(String query, Object... params) {
         return db().update(query, params).execute();
     }
 
@@ -192,8 +256,8 @@ public final class Queries {
     }
 
     /**
-     * Calls stored procedure for a single result on provided connection.<br/>
-     * Procedure is MUST not have any arguments and return results as a <code>{@link ResultSet}</code> object.<br/>
+     * Calls stored procedure for a single result on provided connection.
+     * <br/>Procedure is MUST not have any arguments and return results as a <code>{@link ResultSet}</code> object.<br/>
      *
      * @param conn   connection to a database
      * @param mapper <code>{@link ResultSet}</code> to value mapper
@@ -206,9 +270,9 @@ public final class Queries {
     }
 
     /**
-     * Calls stored procedure for a single result on previously provided connection.<br/>
-     * Procedure is MUST not have any arguments and return results as a <code>{@link ResultSet}</code> object.<br/>
-     * The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Calls stored procedure for a single result on previously provided connection.
+     * <br/>Procedure is MUST not have any arguments and return results as a <code>{@link ResultSet}</code> object.<br/>
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
      *
      * @param mapper <code>{@link ResultSet}</code> to value mapper
      * @param query  a procedure call query (must conform syntax) to execute against previously provided connection
@@ -231,8 +295,8 @@ public final class Queries {
     }
 
     /**
-     * Calls stored procedure on previously provided connection that is with no results expected.<br/>
-     * The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Calls stored procedure on previously provided connection that is with no results expected.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
      *
      * @param query  a query to execute against provided connection (must conform procedure call syntax)
      * @param params procedure IN parameters (if any)
@@ -253,8 +317,8 @@ public final class Queries {
     }
 
     /**
-     * Executes an arbitrary query on the previously provided connection.<br/>
-     * The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Executes an arbitrary query on the previously provided connection.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
      *
      * @param query  a query to execute against provided connection
      * @param params query parameters (if any)
@@ -274,8 +338,8 @@ public final class Queries {
     }
 
     /**
-     * Executes an arbitrary script on the provided connection.<br/>
-     * The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Executes an arbitrary script on the provided connection.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
      *
      * @param script a script to execute against previously provided connection
      */

@@ -17,7 +17,6 @@ package buckelieg.jdbc.fn;
 
 import javax.annotation.Nonnull;
 import javax.annotation.ParametersAreNonnullByDefault;
-import java.io.PrintStream;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
@@ -26,7 +25,6 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import static buckelieg.jdbc.fn.Utils.*;
@@ -41,8 +39,8 @@ import static java.util.stream.Collectors.toList;
 public interface Select extends Query {
 
     /**
-     * In cases when single result of SELECT statement is expected.<br/>
-     * Like <code>SELECT COUNT(*) FROM TABLE_NAME</code> etc...
+     * In cases when single result of SELECT statement is expected.
+     * <br/>Like <code>SELECT COUNT(*) FROM TABLE_NAME</code> etc...
      *
      * @param mapper ResultSet mapper function
      * @throws NullPointerException if mapper is null
@@ -73,12 +71,12 @@ public interface Select extends Query {
 
     /**
      * Stream abstraction over ResultSet.
-     * Note:
+     * <br/>Note:
      * Whenever we left stream without calling some 'reduction' (terminal) operation we left resource freeing to JDBC
-     * <code>stream().iterator().next().get(...)</code>
-     * Thus there could be none or some rows more, but result set (and a statement) would not be closed forcibly.
-     * In such cases we rely on JDBC resources auto closing mechanism.
-     * And it is strongly recommended to use <code>single</code> method for the cases above.
+     * <br/><code>stream().iterator().next().get(...)</code>
+     * <br/>Thus there could be none or some rows more, but result set (and a statement) would not be closed forcibly.
+     * <br/>In such cases we rely on JDBC resources auto closing mechanism.
+     * <br/>And it is strongly recommended to use <code>single</code> method for the cases above.
      *
      * @return a {@link Stream} over {@link ResultSet}
      * @see #single(TryFunction)
@@ -99,6 +97,29 @@ public interface Select extends Query {
      */
     @Nonnull
     <T> Stream<T> execute(TryFunction<ResultSet, T, SQLException> mapper);
+
+    /**
+     * An alias for {@link #execute(TryFunction)} method.
+     *
+     * @param mapper result set mapper which is not required to handle {@link SQLException}
+     * @return a {@link Stream} over mapped {@link ResultSet}
+     * @see #execute(TryFunction)
+     */
+    @Nonnull
+    default <T> Stream<T> stream(TryFunction<ResultSet, T, SQLException> mapper) {
+        return execute(mapper);
+    }
+
+    /**
+     * An alias for {@link #execute()} method.
+     *
+     * @return a {@link Stream} of {@link Map}s
+     * @see #execute()
+     */
+    @Nonnull
+    default Stream<Map<String, Object>> stream() {
+        return execute();
+    }
 
     /**
      * Shorthand for stream mapping for list.
@@ -191,21 +212,14 @@ public interface Select extends Query {
     Select skipWarnings(boolean skipWarnings);
 
     /**
-     * Prints this query string (as SQL) to provided logger.
-     *
-     * @param printer query string consumer
-     * @return select query abstraction
+     * {@inheritDoc}
      */
     @Override
     @Nonnull
     Select print(Consumer<String> printer);
 
     /**
-     * Prints this query string (as SQL) to standard output.
-     *
-     * @return select query abstraction
-     * @see System#out
-     * @see PrintStream#println
+     * {@inheritDoc}
      */
     @Nonnull
     default Select print() {
