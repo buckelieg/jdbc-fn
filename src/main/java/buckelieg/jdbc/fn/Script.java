@@ -22,35 +22,21 @@ import java.sql.SQLException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-import static buckelieg.jdbc.fn.Utils.STATEMENT_DELIMITER;
-
 /**
- * An abstraction for a series of an separate arbitrary SQL queries which are executed sequentially.
- * <br/>Result is an execution time (in milliseconds) taken the whole series to complete.
+ * An abstraction for a series of an separate arbitrary SQL queries which are executed sequentially
+ * <br/>Result is an execution time (in milliseconds) taken the whole series to complete
  */
 @SuppressWarnings("unchecked")
 @ParametersAreNonnullByDefault
 public interface Script extends Query {
 
     /**
-     * Executes a SQL script with provided statements delimiter
+     * Executes a SQL script
      *
-     * @param delimiter statements delimiter (default is <code>;</code>)
      * @return script execution time in milliseconds
      */
     @Nonnull
-    Long execute(String delimiter);
-
-    /**
-     * Executes a SQL script with default statements delimiter (<code>;</code>)
-     *
-     * @return script execution time in milliseconds
-     * @see #execute(String)
-     */
-    @Nonnull
-    default Long execute() {
-        return execute(STATEMENT_DELIMITER);
-    }
+    Long execute();
 
     /**
      * {@inheritDoc}
@@ -90,10 +76,10 @@ public interface Script extends Query {
     }
 
     /**
-     * Sets flag whether to skip errors during script execution.
-     * <br/>If flag is set to false then script execution is halt on the first error occurred.
+     * Sets flag whether to skip errors during script execution
+     * <br/>If flag is set to false then script execution is halt on the first error occurred
      *
-     * @param skipErrors false if to stop on the first error, true - otherwise
+     * @param skipErrors false if to stop on the first error, true (the default) - otherwise
      * @return script query abstraction
      */
     @Nonnull
@@ -107,11 +93,11 @@ public interface Script extends Query {
     Script skipWarnings(boolean skipWarnings);
 
     /**
-     * Registers an error/warning handler.
-     * <br/>The default handler is noop handler.
-     * <br/>I.e. if skipErrors or skipWarnings flag is set to false but no errorHandler is provided the default handler (which does nothing) is used.
+     * Registers an error/warning handler
+     * <br/>The default handler is noop handler
+     * <br/>I.e. if skipErrors or skipWarnings flag is set to false but no errorHandler is provided the default handler (which does nothing) is used
      *
-     * @param handler error/warning handler.
+     * @param handler error/warning handler
      * @return script query abstraction
      * @throws NullPointerException if handler is null
      * @see #skipErrors(boolean)
@@ -121,8 +107,8 @@ public interface Script extends Query {
     Script errorHandler(Consumer<SQLException> handler);
 
     /**
-     * Sets handler for each parsed query (as SQL string) to be handled.
-     * <br/>Intended for debug purposes (like Logger::debug).
+     * Sets handler for each parsed query (as SQL string) to be handled
+     * <br/>Intended for debug purposes (like Logger::debug)
      *
      * @param logger query string consumer
      * @return a script query abstraction
@@ -131,7 +117,7 @@ public interface Script extends Query {
     Script verbose(Consumer<String> logger);
 
     /**
-     * Prints each parsed query (as SQL) to standard output.
+     * Prints each parsed query (as SQL) to standard output
      *
      * @return a script query abstraction
      * @see #verbose(Consumer)

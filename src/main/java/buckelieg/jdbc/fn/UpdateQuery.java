@@ -90,7 +90,7 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
     }
 
     @Override
-    public Update batched(boolean isBatch) {
+    public Update batch(boolean isBatch) {
         this.isBatch = isBatch;
         return this;
     }
@@ -148,15 +148,9 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
         return execute(valueMapper, generatedValuesHandler);
     }
 
-    /**
-     * Executes this DML query returning affected row count.
-     * If this query represents a batch then affected rows are summarized for all batches.
-     *
-     * @return affected rows count
-     */
     @Nonnull
     public Long execute() {
-        return jdbcTry(() -> batch.length > 1 ? doInTransaction(connection, null, this::doExecute) : doExecute(connection));
+        return jdbcTry(() -> batch.length > 1 ? doInTransaction(() -> connection, null, () -> doExecute(connection)) : doExecute(connection));
     }
 
     private long doExecute(Connection conn) throws SQLException {

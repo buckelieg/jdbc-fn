@@ -40,7 +40,7 @@ public interface TryFunction<I, O, E extends Throwable> {
     O apply(I input) throws E;
 
     /**
-     * Returns a function that always returns its input argument.
+     * Returns a function that always returns its input argument
      *
      * @param <T> the type of the input and output objects to the function
      * @return a function that always returns its input argument
@@ -50,9 +50,9 @@ public interface TryFunction<I, O, E extends Throwable> {
     }
 
     /**
-     * Returns reference of lambda expression.
-     * Typical usage is:<br/>
-     * {@code TryFunction.of(x -> null).andThen(nil -> null);}
+     * Returns reference of lambda expression
+     * <br/>Typical usage is:
+     * <br/>{@code TryFunction.of(x -> null).andThen(nil -> null);}
      *
      * @param tryFunction a function
      * @return lambda as {@link TryFunction} reference
@@ -63,8 +63,7 @@ public interface TryFunction<I, O, E extends Throwable> {
     }
 
     /**
-     * Returns a composed function that first applies the {@code before}
-     * function to its input, and then applies this function to the result.
+     * Returns a composed function that first applies the {@code before} function to its input, and then applies this function to the result
      *
      * @param <V>    the type of input to the {@code before} function, and to the
      *               composed function
@@ -85,8 +84,7 @@ public interface TryFunction<I, O, E extends Throwable> {
     }
 
     /**
-     * Returns a composed function that first applies this function to
-     * its input, and then applies the {@code after} function to the result.
+     * Returns a composed function that first applies this function to its input, and then applies the {@code after} function to the result
      *
      * @param <V>   the type of output of the {@code after} function, and of the
      *              composed function

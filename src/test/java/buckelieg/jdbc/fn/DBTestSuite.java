@@ -34,8 +34,8 @@ import static java.lang.Thread.currentThread;
 import static java.util.AbstractMap.SimpleImmutableEntry;
 import static java.util.Collections.singletonList;
 import static java.util.stream.Collectors.joining;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static java.util.stream.Collectors.toList;
+import static org.junit.Assert.*;
 
 
 // TODO more test suites for other RDBMS
@@ -47,8 +47,8 @@ public class DBTestSuite {
 
     @BeforeClass
     public static void init() throws Exception {
-//        Class.forName("org.apache.derby.jdbc.EmbeddedDriver");
-//        conn = DriverManager.getConnection("jdbc:derby:memory:test;create=true");
+        Class.forName("org.apache.derby.jdbc.EmbeddedDriver");
+        conn = DriverManager.getConnection("jdbc:derby:memory:test;create=true");
         EmbeddedDataSource ds = new EmbeddedDataSource();
         ds.setDatabaseName("test");
         ds.setCreateDatabase("create");
@@ -91,11 +91,6 @@ public class DBTestSuite {
             ps.setString(1, "name_" + (i + 1));
             ps.execute();
         }
-    }
-
-    @Test(expected = SQLRuntimeException.class)
-    public void testInvalidConnectionURL() throws Exception {
-        new DB("wrong-connection-url").select("SELECT 1").list();
     }
 
     @Test
@@ -188,7 +183,7 @@ public class DBTestSuite {
 
     @Test
     public void testUpdateBatch() throws Exception {
-        assertEquals(2L, db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}}).execute().longValue());
+        assertEquals(2L, db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}}).batch(true).execute().longValue());
     }
 
     @Test
@@ -204,7 +199,7 @@ public class DBTestSuite {
 
     @Test
     public void testUpdateBatchBatch() throws Exception {
-        assertEquals(2L, db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}}).batched(true).execute().longValue());
+        assertEquals(2L, db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}}).batch(true).execute().longValue());
     }
 
     @Test
@@ -225,7 +220,7 @@ public class DBTestSuite {
     }
 
     @Test
-    public void testSetRansactionIsolationLevel() throws Exception {
+    public void testSetTransactionIsolationLevel() throws Exception {
         assertEquals(2L, db.update("DELETE FROM TEST WHERE id=?", new Object[][]{{1}, {2}}).execute().longValue());
         assertEquals(8L, db.select("SELECT COUNT(*) FROM TEST").single((rs) -> rs.getLong(1)).orElse(-1L).longValue());
     }
@@ -310,7 +305,7 @@ public class DBTestSuite {
         try {
             action.accept(rs);
         } catch (SQLException e) {
-            assertEquals("Unsupported operation", e.getMessage());
+            assertEquals(Utils.EXCEPTION_MESSAGE, e.getMessage());
         }
     }
 
@@ -372,7 +367,6 @@ public class DBTestSuite {
                 )
         );
         // TODO perform script test here
-
     }
 
     @Test(expected = SQLRuntimeException.class)
@@ -425,7 +419,7 @@ public class DBTestSuite {
 
     @Test
     public void testTransactions() throws Exception {
-        Long result = db.transaction(false, TransactionIsolation.SERIALIZABLE, db ->
+        Long result = db.transaction(false, TransactionIsolation.SERIALIZABLE, () ->
                 db.update("INSERT INTO test(name) VALUES(?)", "name")
                         .skipWarnings(false)
                         .timeout(1, TimeUnit.MINUTES)
@@ -444,7 +438,7 @@ public class DBTestSuite {
     public void testTransactionException() throws Exception {
         Long countBefore = db.select("SELECT COUNT(*) FROM TEST").single(rs -> rs.getLong(1)).orElse(null);
         try {
-            db.transaction(false, TransactionIsolation.SERIALIZABLE, db -> {
+            db.transaction(false, TransactionIsolation.SERIALIZABLE, () -> {
                 db.update("INSERT INTO test(name) VALUES(?)", "name").execute();
                 throw new SQLException("Rollback!");
             });
@@ -454,6 +448,21 @@ public class DBTestSuite {
             Long countAfter = db.select("SELECT COUNT(*) FROM TEST").single(rs -> rs.getLong(1)).orElse(null);
             assertEquals(countBefore, countAfter);
         }
+    }
+
+    @Test
+    public void testNestedTransactions() throws Exception {
+        List<String> list = db.transaction(() ->
+                db.update("INSERT INTO test(name) VALUES(?)", "new_name").execute(
+                        rs -> rs.getLong(1),
+                        ids -> db.transaction(() ->
+                                db.select("SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry<>("ids", ids.collect(toList()))).list(rs -> rs.getString(1))
+                        )
+                )
+        );
+        assertNotNull(list);
+        assertEquals(1L, list.size());
+        assertEquals("new_name", list.iterator().next());
     }
 
     @Test
@@ -528,6 +537,17 @@ public class DBTestSuite {
         assertEquals(1, Queries.list("SELECT * FROM TEST WHERE 1=1 AND id=?", 1).size());
         assertEquals(3, Queries.list("SELECT * FROM TEST WHERE 1=1 AND id IN (:ids)", new SimpleImmutableEntry<>("ids", new int[]{1, 2, 3})).size());
         //TODO add more tests
+    }
+
+    @Test
+    public void testConnections() throws Exception {
+//        Connection c = ds.getConnection();
+//        DB db = new DB(ds);
+        assertEquals(10, db.select("SELECT * FROM TEST").list().size());
+        db.close();
+        assertEquals(10, db.select("SELECT * FROM TEST").list().size());
+        db.close();
+        assertEquals(10, db.select("SELECT * FROM TEST").list().size());
     }
 
 }

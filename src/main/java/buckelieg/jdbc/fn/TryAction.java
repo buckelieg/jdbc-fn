@@ -18,8 +18,8 @@ package buckelieg.jdbc.fn;
 import static java.util.Objects.requireNonNull;
 
 /**
- * No-argument function which return no result that might throw an exception.
- * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #doTry()}}.
+ * No-argument function which return no result that might throw an exception
+ * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #doTry()}}
  *
  * @param <E> exception type
  */
@@ -35,7 +35,7 @@ public interface TryAction<E extends Throwable> {
     void doTry() throws E;
 
     /**
-     * Returns reference of lambda expression.
+     * Returns reference of lambda expression
      *
      * @param tryAction an action function
      * @return {@link TryAction} reference
@@ -48,9 +48,9 @@ public interface TryAction<E extends Throwable> {
     /**
      * Returns a composed {@code TryAction} that performs, in sequence, this<br/>
      * operation is followed by the {@code after} operation. If performing either<br/>
-     * operation throws an exception, then corresponding exception is thrown.<br/>
+     * operation throws an exception, then corresponding exception is thrown<br/>
      * If performing this operation throws an exception,<br/>
-     * the {@code after} operation will not be performed.
+     * the {@code after} operation will not be performed
      *
      * @param after the operation to perform after this operation
      * @return a composed {@code TryAction} that performs in sequence this
@@ -73,9 +73,9 @@ public interface TryAction<E extends Throwable> {
     /**
      * Returns a composed {@code TryAction} that performs, in sequence, this<br/>
      * operation is preceded by the {@code before} operation. If performing either<br/>
-     * operation throws an exception, then corresponding exception is thrown.<br/>
+     * operation throws an exception, then corresponding exception is thrown<br/>
      * If performing this operation throws an exception,<br/>
-     * the {@code before} operation will not be performed.
+     * the {@code before} operation will not be performed
      *
      * @param before the operation to perform before this operation
      * @return a composed {@code TryAction} that performs in sequence this

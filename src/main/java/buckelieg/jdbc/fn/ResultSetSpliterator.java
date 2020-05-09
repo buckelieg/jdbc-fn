@@ -24,7 +24,7 @@ import java.util.function.Consumer;
 import static buckelieg.jdbc.fn.Utils.newSQLRuntimeException;
 import static java.util.Objects.requireNonNull;
 
-class ResultSetSpliterator implements Spliterator<ResultSet>, AutoCloseable {
+final class ResultSetSpliterator implements Spliterator<ResultSet>, AutoCloseable {
 
     private final ResultSet wrapper;
     private boolean hasNext;

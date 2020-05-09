@@ -23,14 +23,11 @@ import javax.sql.DataSource;
 import java.io.File;
 import java.nio.charset.Charset;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Properties;
 import java.util.function.BiFunction;
-import java.util.function.Supplier;
 
 import static buckelieg.jdbc.fn.Utils.*;
 import static java.lang.String.format;
@@ -58,64 +55,22 @@ import static java.util.stream.Stream.of;
 public final class DB implements AutoCloseable {
 
     private Connection connection;
-    private final Supplier<Connection> connectionSupplier;
+    private final TrySupplier<Connection, SQLException> connectionSupplier;
 
-    /**
-     * Creates DB from connection string using {@code DriverManager#getConnection} method
-     *
-     * @param connectionUrl rdbms-specific connection URL
-     * @throws SQLRuntimeException if connection string is invalid
-     * @see DriverManager#getConnection(String)
-     */
-    public DB(String connectionUrl) {
-        this(() -> DriverManager.getConnection(connectionUrl));
+    DB(Connection connection) {
+        this(() -> requireNonNull(connection, "Connection must be provided"));
     }
 
     /**
-     * Creates DB from connection string using {@code DriverManager#getConnection} method
-     *
-     * @param connectionUrl rdbms-specific connection URL
-     * @param user          the user under which
-     * @param password      user password
-     * @throws SQLRuntimeException if connection string is invalid
-     * @see DriverManager#getConnection(String, String, String)
-     */
-    public DB(String connectionUrl, String user, String password) {
-        this(() -> DriverManager.getConnection(connectionUrl, user, password));
-    }
-
-    /**
-     * Creates DB from connection string using {@code DriverManager#getConnection} method
-     *
-     * @param connectionUrl rdbms-specific connection URL
-     * @param config        arbitrary key-value pairs represent a configuration
-     * @throws SQLRuntimeException if connection string is invalid
-     * @see DriverManager#getConnection(String, Properties)
-     */
-    public DB(String connectionUrl, Properties config) {
-        this(() -> DriverManager.getConnection(connectionUrl, config));
-    }
-
-    /**
-     * Creates DB with connection supplier.
-     * <br/>This caches provided connection and tries to create new if previous one is closed.
+     * Creates DB with connection supplier
+     * <br/>This caches provided connection and tries to create new if previous one is closed
      *
      * @param connectionSupplier the connection supplier.
      * @throws NullPointerException if connection provider is null
      */
     public DB(TrySupplier<Connection, SQLException> connectionSupplier) {
         requireNonNull(connectionSupplier, "Connection supplier must be provided");
-        this.connectionSupplier = () -> getConnection(connectionSupplier);
-    }
-
-    /**
-     * Creates DB with provided connection
-     *
-     * @param connection the connection to operate on
-     * @throws NullPointerException if connection is null
-     */
-    public DB(Connection connection) {
-        this(() -> requireNonNull(connection, "Connection must be provided"));
+        this.connectionSupplier = connectionSupplier;
     }
 
     /**
@@ -130,7 +85,7 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Closes underlying connection.
+     * Closes underlying connection
      *
      * @throws SQLRuntimeException if something went wrong
      */
@@ -147,10 +102,10 @@ public final class DB implements AutoCloseable {
     /**
      * Executes an arbitrary parameterized SQL statement
      * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters.
+     * <br/>So that :NAME and :name are two different parameters
      *
      * @param query           an SQL query to execute
-     * @param namedParameters query named parameters. Parameter name in the form of :name
+     * @param namedParameters query named parameters in the form of :name
      * @return select query
      * @throws IllegalArgumentException if provided query is a procedure call statement
      * @see Select
@@ -161,12 +116,12 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes an arbitrary SQL statement with named parameters.
+     * Executes an arbitrary SQL statement with named parameters
      * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters.
+     * <br/>So that :NAME and :name are two different parameters
      *
      * @param query           an arbitrary SQL query to execute
-     * @param namedParameters query named parameters. Parameter name in the form of :name
+     * @param namedParameters query named parameters in the form of :name
      * @return select query
      * @throws IllegalArgumentException if provided query is a procedure call statement
      * @see Select
@@ -178,7 +133,7 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes a set of an arbitrary SQL statement(s) against provided connection.
+     * Executes a set of an arbitrary SQL statement(s)
      *
      * @param script          (a series of) SQL statement(s) to execute
      * @param namedParameters named parameters to be used in the script
@@ -189,11 +144,11 @@ public final class DB implements AutoCloseable {
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Nonnull
     public final Script script(String script, Map<String, ?> namedParameters) {
-        return new ScriptQuery(connectionSupplier.get(), script, namedParameters.entrySet());
+        return new ScriptQuery(getConnection(connectionSupplier), script, namedParameters.entrySet());
     }
 
     /**
-     * Executes a set of an arbitrary SQL statement(s) against provided connection.
+     * Executes a set of an arbitrary SQL statement(s)
      *
      * @param script          (a series of) SQL statement(s) to execute
      * @param namedParameters named parameters to be used in the script
@@ -205,11 +160,11 @@ public final class DB implements AutoCloseable {
     @SafeVarargs
     @Nonnull
     public final <T extends Entry<String, ?>> Script script(String script, T... namedParameters) {
-        return new ScriptQuery(connectionSupplier.get(), script, asList(namedParameters));
+        return new ScriptQuery(getConnection(connectionSupplier), script, asList(namedParameters));
     }
 
     /**
-     * Executes an arbitrary SQL statement(s) against provided connection with default encoding (<code>Charset.UTF_8</code>)
+     * Executes an arbitrary SQL statement(s) with default encoding (<code>Charset.UTF_8</code>)
      *
      * @param source          file with a SQL script contained to execute
      * @param namedParameters named parameters to be used in the script
@@ -224,7 +179,7 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes an arbitrary SQL statement(s) against provided connection.
+     * Executes an arbitrary SQL statement(s)
      *
      * @param source          file with a SQL script contained
      * @param encoding        source file encoding to be used
@@ -245,7 +200,7 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Calls stored procedure.
+     * Calls stored procedure
      *
      * @param query procedure call string to execute
      * @return stored procedure call
@@ -258,7 +213,8 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Calls stored procedure. Supplied parameters are considered as IN parameters
+     * Calls stored procedure
+     * <br/>Supplied parameters are considered as IN parameters
      *
      * @param query      procedure call string to execute
      * @param parameters procedure IN parameters' values
@@ -272,10 +228,10 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Calls stored procedure.
+     * Calls stored procedure
      * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters.
-     * <br/>Named parameters order must match parameters type of the procedure called.
+     * <br/>So that :NAME and :name are two different parameters
+     * <br/>Named parameters order must match parameters type of the procedure called
      *
      * @param query      procedure call string to execute
      * @param parameters procedure parameters as declared (IN/OUT/INOUT)
@@ -307,7 +263,7 @@ public final class DB implements AutoCloseable {
                 );
             }
         }
-        return new StoredProcedureQuery(connectionSupplier.get(), query, parameters);
+        return new StoredProcedureQuery(getConnection(connectionSupplier), query, parameters);
     }
 
     /**
@@ -337,12 +293,12 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid select statement", query));
         }
-        return new SelectQuery(connectionSupplier.get(), checkAnonymous(query), parameters);
+        return new SelectQuery(getConnection(connectionSupplier), checkAnonymous(query), parameters);
     }
 
 
     /**
-     * Executes DML statements: INSERT, UPDATE or DELETE.
+     * Executes DML statements: INSERT, UPDATE or DELETE
      *
      * @param query INSERT/UPDATE/DELETE query to execute
      * @param batch an array of query parameters on the declared order of '?'
@@ -355,11 +311,11 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid DML statement", query));
         }
-        return new UpdateQueryDecorator(connectionSupplier.get(), checkAnonymous(query), batch);
+        return new UpdateQueryDecorator(getConnection(connectionSupplier), checkAnonymous(query), batch);
     }
 
     /**
-     * Executes a single SQL query against provided connection.
+     * Executes a single SQL query
      *
      * @param query      a single arbitrary SQL query to execute
      * @param parameters query parameters in the declared order of '?'
@@ -370,16 +326,16 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid select statement", query));
         }
-        return new QueryImpl(connectionSupplier.get(), checkAnonymous(query), parameters);
+        return new QueryImpl(getConnection(connectionSupplier), checkAnonymous(query), parameters);
     }
 
     /**
-     * Executes SELECT statement.
+     * Executes SELECT statement
      * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters.
+     * <br/>So that :NAME and :name are two different parameters
      *
      * @param query           SELECT query to execute
-     * @param namedParameters query named parameters. Parameter name in the form of :name
+     * @param namedParameters query named parameters in the form of :name
      * @return select query
      * @throws IllegalArgumentException if provided query is a procedure call statement
      * @see Select
@@ -390,12 +346,12 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes SELECT statement with named parameters.
+     * Executes SELECT statement with named parameters
      * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters.
+     * <br/>So that :NAME and :name are two different parameters
      *
      * @param query           SELECT query to execute
-     * @param namedParameters query named parameters. Parameter name in the form of :name
+     * @param namedParameters query named parameters in the form of :name
      * @return select query
      * @throws IllegalArgumentException if provided query is a procedure call statement
      * @see Select
@@ -407,7 +363,7 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes statements: INSERT, UPDATE or DELETE.
+     * Executes statements: INSERT, UPDATE or DELETE
      *
      * @param query INSERT/UPDATE/DELETE query to execute
      * @return update query
@@ -420,7 +376,7 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes statements: INSERT, UPDATE or DELETE.
+     * Executes statements: INSERT, UPDATE or DELETE
      *
      * @param query      INSERT/UPDATE/DELETE query to execute
      * @param parameters query parameters on the declared order of '?'
@@ -434,12 +390,12 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes statements: INSERT, UPDATE or DELETE.
+     * Executes statements: INSERT, UPDATE or DELETE
      * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters.
+     * <br/>So that :NAME and :name are two different parameters
      *
      * @param query           INSERT/UPDATE/DELETE query to execute
-     * @param namedParameters query named parameters. Parameter name in the form of :name
+     * @param namedParameters query named parameters in the form of :name
      * @return update query
      * @throws IllegalArgumentException if provided query is a procedure call statement
      * @see Update
@@ -451,12 +407,12 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Executes statements: INSERT, UPDATE or DELETE.
+     * Executes statements: INSERT, UPDATE or DELETE
      * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters.
+     * <br/>So that :NAME and :name are two different parameters
      *
      * @param query INSERT/UPDATE/DELETE query to execute
-     * @param batch an array of query named parameters. Parameter name in the form of :name
+     * @param batch an array of query named parameters in the form of :name
      * @return update query
      * @throws IllegalArgumentException if provided query is a procedure call statement
      * @see Update
@@ -469,13 +425,12 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     *
-     * Creates a transaction for the set of an arbitrary statements with specified isolation level.
+     * Creates a transaction for the set of an arbitrary statements with specified isolation level
      * <br/>Example usage:
      * <pre>{@code
      *  // suppose we have to create a bunch of new users with provided names and get the latest with all it's attributes filled in
      *  DB db = new DB("connectionUrl");
-     *  User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, db ->
+     *  User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, () ->
      *      db.update("INSERT INTO users(name) VALUES(?)", "name1", "name2", "name3", ...)
      *        .skipWarnings(false)
      *        .timeout(10, TimeUnit.MINUTES)
@@ -498,37 +453,51 @@ public final class DB implements AutoCloseable {
      * Note that return value must not be an opened cursor, so that code below will throw an exception of Invalid transaction state - held cursor requires same isolation level:
      * <pre>{@code Stream<String> stream = db.transaction(false, TransactionIsolation.SERIALIZABLE, db -> db.select("SELECT * FROM my_table").execute(rs -> rs.getString(1)));
      * stream.collect(Collectors.toList());}</pre>
-     * Unless desired isolation level matches the RDBMS default one.
+     * Unless desired isolation level matches the RDBMS default one
+     * <br/>If transaction isolation level is not supported by RDBMS then default one will be used
      *
      * @param createNew whether to create new transaction (implies obtaining new connection if possible) or not.
-     * @param level transaction isolation level (null -> default)
-     * @param action an action to be performed in transaction
+     * @param level     transaction isolation level (null -> default)
+     * @param action    an action to be performed in transaction
      * @return an arbitrary result
      * @throws NullPointerException if no action is provided
      * @see TransactionIsolation
      * @see TryFunction
      */
     @Nullable
-    public <T> T transaction(boolean createNew, @Nullable TransactionIsolation level, TryFunction<DB, T, SQLException> action) {
+    public <T> T transaction(boolean createNew, @Nullable TransactionIsolation level, TrySupplier<T, SQLException> action) {
         try {
-            return doInTransaction(createNew ? connectionSupplier.get() : getConnection(connectionSupplier::get), level, conn -> requireNonNull(action, "Action must be provided").apply(new DB(conn)));
+            return doInTransaction(createNew ? connectionSupplier : () -> getConnection(connectionSupplier), level, () -> requireNonNull(action, "Action must be provided").get());
         } catch (SQLException e) {
             throw newSQLRuntimeException(e);
         }
     }
 
     /**
-     * Creates a transaction for the set of an arbitrary statements with default isolation level.
+     * Creates a transaction for the set of an arbitrary statements with default isolation level
      *
      * @param createNew whether to create new transaction (implies getting new connection if possible) or not.
+     * @param action    an action to be performed in transaction
+     * @return an arbitrary result
+     * @throws NullPointerException if no action is provided
+     * @see #transaction(boolean, TransactionIsolation, TrySupplier)
+     */
+    @Nullable
+    public <T> T transaction(boolean createNew, TrySupplier<T, SQLException> action) {
+        return transaction(createNew, null, action);
+    }
+
+    /**
+     * Creates a transaction for the set of an arbitrary statements with default isolation level with <code>createNew</code> set to <code>false</code>
+     *
      * @param action an action to be performed in transaction
      * @return an arbitrary result
      * @throws NullPointerException if no action is provided
-     * @see #transaction(boolean, TransactionIsolation, TryFunction)
+     * @see #transaction(boolean, TrySupplier)
      */
     @Nullable
-    public <T> T transaction(boolean createNew, TryFunction<DB, T, SQLException> action) {
-        return transaction(createNew, null, action);
+    public <T> T transaction(TrySupplier<T, SQLException> action) {
+        return transaction(false, action);
     }
 
     private Select select(String query, Iterable<? extends Entry<String, ?>> namedParams) {
@@ -554,6 +523,9 @@ public final class DB implements AutoCloseable {
                 synchronized (this) {
                     if (connection == null || connection.isClosed()) {
                         connection = requireNonNull(supplier.get(), "Connection supplier must provide non-null connection");
+                        if (connection.isClosed()) {
+                            throw new SQLException("Provided connection is already closed!");
+                        }
                     }
                 }
             }

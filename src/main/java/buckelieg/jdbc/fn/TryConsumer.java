@@ -18,8 +18,8 @@ package buckelieg.jdbc.fn;
 import static java.util.Objects.requireNonNull;
 
 /**
- * One-argument function which returns no result that might throw an exception.
- * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #accept(Object)}.
+ * One-argument function which returns no result that might throw an exception
+ * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #accept(Object)}
  *
  * @param <T> the type of the input to the operation
  * @param <E> the type of the possible exception
@@ -29,7 +29,7 @@ import static java.util.Objects.requireNonNull;
 public interface TryConsumer<T, E extends Throwable> {
 
     /**
-     * Performs this operation on the given argument which might throw an exception.
+     * Performs this operation on the given argument which might throw an exception
      *
      * @param t the input argument
      * @throws E an exception
@@ -37,7 +37,7 @@ public interface TryConsumer<T, E extends Throwable> {
     void accept(T t) throws E;
 
     /**
-     * Returns reference of lambda expression.
+     * Returns reference of lambda expression
      *
      * @param tryConsumer a consumer
      * @return {@link TryConsumer} reference
@@ -48,11 +48,11 @@ public interface TryConsumer<T, E extends Throwable> {
     }
 
     /**
-     * Returns a composed {@code TryConsumer} that performs, in sequence, this<br/>
-     * operation followed by the {@code after} operation. If performing either<br/>
-     * operation throws an exception, then corresponding exception is thrown.<br/>
-     * If performing this operation throws an exception,<br/>
-     * the {@code after} operation will not be performed.
+     * Returns a composed {@code TryConsumer} that performs, in sequence, this
+     * <br/>operation followed by the {@code after} operation. If performing either
+     * <br/>operation throws an exception, then corresponding exception is thrown
+     * <br/>If performing this operation throws an exception,
+     * <br/>the {@code after} operation will not be performed
      *
      * @param after the operation to perform after this operation
      * @return a composed {@code TryConsumer} that performs in sequence this
@@ -74,10 +74,10 @@ public interface TryConsumer<T, E extends Throwable> {
 
     /**
      * Returns a composed {@code TryConsumer} that performs, in sequence, this
-     * operation is preceded by the {@code before} operation. If performing either
-     * operation throws an exception, then corresponding exception is thrown.
-     * If performing this operation throws an exception,
-     * the {@code before} operation will not be performed.
+     * <br/>operation is preceded by the {@code before} operation. If performing either
+     * <br/>operation throws an exception, then corresponding exception is thrown
+     * <br/>If performing this operation throws an exception,
+     * <br/>the {@code before} operation will not be performed
      *
      * @param before the operation to perform before this operation
      * @return a composed {@code TryConsumer} that performs in sequence this

@@ -68,7 +68,7 @@ final class UpdateQueryDecorator implements Update {
     }
 
     @Override
-    public Update batched(boolean isBatch) {
+    public Update batch(boolean isBatch) {
         this.isBatch = isBatch;
         return this;
     }
@@ -116,6 +116,6 @@ final class UpdateQueryDecorator implements Update {
     }
 
     private Update setParameters(Update update) {
-        return update.timeout(timeout, unit).poolable(isPoolable).escaped(isEscaped).batched(isBatch).large(isLarge).skipWarnings(skipWarnings);
+        return update.timeout(timeout, unit).poolable(isPoolable).escaped(isEscaped).batch(isBatch).large(isLarge).skipWarnings(skipWarnings);
     }
 }

@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * An abstraction for arbitrary SQL query.
+ * An abstraction for arbitrary SQL query
  *
  * @see AutoCloseable
  * @see Select
@@ -43,7 +43,7 @@ public interface Query extends AutoCloseable {
     <T> T execute();
 
     /**
-     * Tells JDBC driver that this query is poolable.
+     * Tells JDBC driver that this query is poolable
      *
      * @param poolable true if this query is poolable, false otherwise
      * @return a query abstraction
@@ -53,8 +53,8 @@ public interface Query extends AutoCloseable {
     Query poolable(boolean poolable);
 
     /**
-     * Sets query execution timeout.
-     * <br/>Negative values are silently ignored.
+     * Sets query execution timeout
+     * <br/>Negative values are silently ignored
      *
      * @param timeout query timeout in seconds greater than 0 (0 means no timeout)
      * @return a query abstraction
@@ -66,9 +66,9 @@ public interface Query extends AutoCloseable {
     }
 
     /**
-     * Sets query execution timeout.
-     * <br/>Negative values are silently ignored.
-     * <br/>TimeUnit is converted to seconds.
+     * Sets query execution timeout
+     * <br/>Negative values are silently ignored
+     * <br/>TimeUnit is converted to seconds
      *
      * @param timeout query timeout in seconds greater than 0 (0 means no timeout)
      * @param unit a time unit
@@ -91,17 +91,17 @@ public interface Query extends AutoCloseable {
 
 
     /**
-     * Sets flag whether to skip on warnings or not.
-     * <br/>Default is <code>true</code>
+     * Sets flag whether to skip on warnings or not
      *
-     * @param skipWarnings true if to skip warning, false - otherwise.
+     * @param skipWarnings true (the default) if to skip warning, false - otherwise
      * @return a query abstraction
      */
     @Nonnull
     Query skipWarnings(boolean skipWarnings);
 
     /**
-     * Prints this query string (as SQL) to provided logger.
+     * Prints this query string (as SQL) to provided logger
+     * <br/>All parameters are substituted by calling theirs' <code>toString()</code> methods
      *
      * @param printer query string consumer
      * @return a query abstraction
@@ -110,7 +110,8 @@ public interface Query extends AutoCloseable {
     Query print(Consumer<String> printer);
 
     /**
-     * Prints this query string (as SQL) to standard output.
+     * Prints this query string (as SQL) to standard output
+     * <br/>All parameters are substituted by calling theirs' <code>toString()</code> methods
      *
      * @return a query abstraction
      * @see System#out
@@ -122,8 +123,8 @@ public interface Query extends AutoCloseable {
     }
 
     /**
-     * Represents this <code>query</code> AS <code>SQL</code> string.
-     * <br/>All parameters are substituted by calling theirs' <code>toString()</code> methods.
+     * Represents this <code>query</code> AS <code>SQL</code> string
+     * <br/>All parameters are substituted by calling theirs' <code>toString()</code> methods
      *
      * @return this query as a SQL string
      */

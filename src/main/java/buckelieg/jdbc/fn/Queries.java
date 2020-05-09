@@ -29,12 +29,12 @@ import java.util.Optional;
 import static java.util.Objects.requireNonNull;
 
 /**
- * Helper class which simplifies common JDBC scenarios.
+ * Helper class which simplifies common JDBC scenarios
  * <br/>The simplest usage implies to set a connection:
  * <br/><pre>{@code Connection conn = ...;
  * Queries.setConnection(conn);
  * List<String> list = Queries.list(rs -> rs.getString("name"), "SELECT name FROM my_table");}</pre>
- * Note that connection remains opened after execution and it must be closed explicitly.
+ * Note that connection remains opened after execution and it must be closed explicitly
  */
 @ParametersAreNonnullByDefault
 public final class Queries {
@@ -50,14 +50,14 @@ public final class Queries {
     }
 
     /**
-     * Obtains a <code>{@link List}</code> of values from provided connection.
+     * Obtains a <code>{@link List}</code> of values from provided connection
      *
      * @param conn   connection to a database
      * @param mapper <code>{@link ResultSet}</code> to value mapper
      * @param query  a query to execute against provided connection
      * @param params query parameters (if any)
      * @param <T> result parameter type
-     * @return a <code>{@link List}</code> of mapped values.
+     * @return a <code>{@link List}</code> of mapped values
      */
     @Nonnull
     public static <T> List<T> list(Connection conn, TryFunction<ResultSet, T, SQLException> mapper, String query, Object... params) {
@@ -65,14 +65,14 @@ public final class Queries {
     }
 
     /**
-     * Obtains a <code>{@link List}</code> of values from previously provided connection.
-     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Obtains a <code>{@link List}</code> of values from previously provided connection
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param mapper <code>{@link ResultSet}</code> to value mapper
      * @param query  a query to execute against previously provided connection
      * @param params query parameters (if any)
      * @param <T> result parameter type
-     * @return a <code>{@link List}</code> of mapped values.
+     * @return a <code>{@link List}</code> of mapped values
      */
     @Nonnull
     public static <T> List<T> list(TryFunction<ResultSet, T, SQLException> mapper, String query, Object... params) {
@@ -80,12 +80,12 @@ public final class Queries {
     }
 
     /**
-     * Obtains a <code>{@link List}</code> of {@link Map}s from provided connection.
+     * Obtains a <code>{@link List}</code> of {@link Map}s from provided connection
      *
      * @param conn   connection to a database
      * @param query  a query to execute against provided connection
      * @param params query parameters (if any)
-     * @return a <code>{@link List}</code> of {@link Map}s.
+     * @return a <code>{@link List}</code> of {@link Map}s
      */
     @Nonnull
     public static List<Map<String, Object>> list(Connection conn, String query, Object... params) {
@@ -93,12 +93,12 @@ public final class Queries {
     }
 
     /**
-     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection.
-     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param query  a query to execute against previously provided connection
      * @param params query parameters (if any)
-     * @return a <code>{@link List}</code> of {@link Map}s.
+     * @return a <code>{@link List}</code> of {@link Map}s
      */
     @Nonnull
     public static List<Map<String, Object>> list(String query, Object... params) {
@@ -106,14 +106,14 @@ public final class Queries {
     }
 
     /**
-     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection.
-     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param mapper <code>{@link ResultSet}</code> to value mapper
      * @param query a query to execute against previously provided connection
      * @param params query parameters (if any)
      * @param <T> result parameter type
-     * @return a <code>{@link List}</code> of mapped values.
+     * @return a <code>{@link List}</code> of mapped values
      */
     @Nonnull
     public static <T> List<T> list(TryFunction<ResultSet, T, SQLException> mapper, String query, Map<String, ?> params) {
@@ -121,12 +121,12 @@ public final class Queries {
     }
 
     /**
-     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection.
-     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param query a query to execute against previously provided connection
      * @param params query parameters (if any)
-     * @return a <code>{@link List}</code> of {@link Map}s.
+     * @return a <code>{@link List}</code> of {@link Map}s
      */
     @Nonnull
     public static List<Map<String, Object>> list(String query, Map<String, ?> params) {
@@ -134,14 +134,14 @@ public final class Queries {
     }
 
     /**
-     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection.
-     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param mapper <code>{@link ResultSet}</code> to value mapper
      * @param query a query to execute against previously provided connection
      * @param params query parameters (if any)
      * @param <T> result parameter type
-     * @return a <code>{@link List}</code> of mapped values.
+     * @return a <code>{@link List}</code> of mapped values
      */
     @SafeVarargs
     @Nonnull
@@ -150,12 +150,12 @@ public final class Queries {
     }
 
     /**
-     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection.
-     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param query a query to execute against previously provided connection
      * @param params query parameters (if any)
-     * @return a <code>{@link List}</code> of {@link Map}s.
+     * @return a <code>{@link List}</code> of {@link Map}s
      */
     @SafeVarargs
     @Nonnull
@@ -164,7 +164,7 @@ public final class Queries {
     }
 
     /**
-     * Obtains a single value from provided connection.
+     * Obtains a single value from provided connection
      *
      * @param conn   connection to a database
      * @param mapper <code>{@link ResultSet}</code> to value mapper
@@ -178,8 +178,8 @@ public final class Queries {
     }
 
     /**
-     * Obtains a single value from previously provided connection.
-     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Obtains a single value from previously provided connection
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param mapper <code>{@link ResultSet}</code> to value mapper
      * @param query  a query to execute against provided connection
@@ -192,7 +192,7 @@ public final class Queries {
     }
 
     /**
-     * Obtains a single value from provided connection.
+     * Obtains a single value from provided connection
      *
      * @param conn   connection to a database
      * @param query  a query to execute against provided connection
@@ -205,8 +205,8 @@ public final class Queries {
     }
 
     /**
-     * Obtains a single value from previously provided connection.
-     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Obtains a single value from previously provided connection
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param query  a query to execute against provided connection
      * @param params query parameters (if any)
@@ -218,7 +218,7 @@ public final class Queries {
     }
 
     /**
-     * Executes provided DML statement on the provided connection.
+     * Executes provided DML statement on the provided connection
      *
      * @param conn   connection to a database
      * @param query  a DML query to execute against provided connection
@@ -230,8 +230,8 @@ public final class Queries {
     }
 
     /**
-     * Executes provided DML statement on the previously provided connection.
-     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Executes provided DML statement on the previously provided connection
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param query  a DML query to execute against provided connection
      * @param params query parameters (if any)
@@ -242,7 +242,7 @@ public final class Queries {
     }
 
     /**
-     * Calls stored procedure on provided connection.
+     * Calls stored procedure on provided connection
      *
      * @param conn   connection to a database
      * @param mapper <code>{@link ResultSet}</code> to value mapper
@@ -256,8 +256,8 @@ public final class Queries {
     }
 
     /**
-     * Calls stored procedure for a single result on provided connection.
-     * <br/>Procedure is MUST not have any arguments and return results as a <code>{@link ResultSet}</code> object.<br/>
+     * Calls stored procedure for a single result on provided connection
+     * <br/>Procedure is MUST not have any arguments and return results as a <code>{@link ResultSet}</code> object
      *
      * @param conn   connection to a database
      * @param mapper <code>{@link ResultSet}</code> to value mapper
@@ -270,9 +270,9 @@ public final class Queries {
     }
 
     /**
-     * Calls stored procedure for a single result on previously provided connection.
+     * Calls stored procedure for a single result on previously provided connection
      * <br/>Procedure is MUST not have any arguments and return results as a <code>{@link ResultSet}</code> object.<br/>
-     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param mapper <code>{@link ResultSet}</code> to value mapper
      * @param query  a procedure call query (must conform syntax) to execute against previously provided connection
@@ -284,7 +284,8 @@ public final class Queries {
     }
 
     /**
-     * Calls stored procedure on provided connection that is with no results expected.
+     * Calls stored procedure on provided connection that is with no results expected
+     * <br/> Procedure parameters are considered as <code>IN</code>-mode.
      *
      * @param conn   connection to a database
      * @param query  a query to execute against provided connection (must conform procedure call syntax)
@@ -295,7 +296,7 @@ public final class Queries {
     }
 
     /**
-     * Calls stored procedure on previously provided connection that is with no results expected.
+     * Calls stored procedure on previously provided connection that is with no results expected
      * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
      *
      * @param query  a query to execute against provided connection (must conform procedure call syntax)
@@ -306,7 +307,7 @@ public final class Queries {
     }
 
     /**
-     * Executes an arbitrary query on the provided connection.
+     * Executes an arbitrary query on the provided connection
      *
      * @param conn   connection to a database
      * @param query  a query to execute against provided connection
@@ -317,8 +318,8 @@ public final class Queries {
     }
 
     /**
-     * Executes an arbitrary query on the previously provided connection.
-     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Executes an arbitrary query on the previously provided connection
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param query  a query to execute against provided connection
      * @param params query parameters (if any)
@@ -328,7 +329,7 @@ public final class Queries {
     }
 
     /**
-     * Executes an arbitrary script on the provided connection.
+     * Executes an arbitrary script on the provided connection
      *
      * @param conn   connection to a database
      * @param script a script to execute against provided connection
@@ -338,8 +339,8 @@ public final class Queries {
     }
 
     /**
-     * Executes an arbitrary script on the provided connection.
-     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method.
+     * Executes an arbitrary script on the provided connection
+     * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param script a script to execute against previously provided connection
      */

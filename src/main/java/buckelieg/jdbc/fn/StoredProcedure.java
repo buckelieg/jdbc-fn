@@ -28,16 +28,16 @@ import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 
 /**
- * An abstraction for STORED PROCEDURE call statement.
+ * An abstraction for STORED PROCEDURE call statement
  */
 @ParametersAreNonnullByDefault
 public interface StoredProcedure extends Select {
 
     /**
-     * Calls procedure for results processing which are expected in the OUT/INOUT parameters.
-     * <br/>If registered - these will be invoked AFTER result set is iterated over.
-     * <br/>If the result set is not iterated exhaustively - mapper and (then) consumer will NOT be invoked.
-     * <br/>The logic of this is to call mapper for creating result and the call consumer to process it.
+     * Calls procedure for results processing which are expected in the OUT/INOUT parameters
+     * <br/>If registered - these will be invoked AFTER result set is iterated over
+     * <br/>If the result set is not iterated exhaustively - mapper and (then) consumer will NOT be invoked
+     * <br/>The logic of this is to call mapper for creating result and the call consumer to process it
      *
      * @param mapper   function for procedure call results processing
      * @param consumer mapper result consumer - will be called after mapper is finished
@@ -48,7 +48,7 @@ public interface StoredProcedure extends Select {
     <T> Select call(TryFunction<CallableStatement, T, SQLException> mapper, Consumer<T> consumer);
 
     /**
-     * Whenever the stored procedure returns no result set but the own results only - this convenience shorthand may be called.
+     * Whenever the stored procedure returns no result set but the own results only - this convenience shorthand may be called
      *
      * @param mapper function that constructs from {@link CallableStatement}
      * @return mapped result as {@link Optional}
@@ -69,7 +69,7 @@ public interface StoredProcedure extends Select {
     /**
      * Calls this procedure ignoring all its possible results
      *
-     * @throws SQLRuntimeException if something went wrong.
+     * @throws SQLRuntimeException if something went wrong
      * @see #call(TryFunction, Consumer)
      */
     default void call() {

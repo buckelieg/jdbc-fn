@@ -49,7 +49,7 @@ public final class P<T> {
     }
 
     /**
-     * Creates a {@link StoredProcedure} <code>IN</code> parameter.
+     * Creates a {@link StoredProcedure} <code>IN</code> parameter
      *
      * @param type  parameter type
      * @param name  parameter name
@@ -63,7 +63,7 @@ public final class P<T> {
     }
 
     /**
-     * Creates an anonymous {@link StoredProcedure} <code>IN</code> parameter with {@link JDBCType#JAVA_OBJECT} type.
+     * Creates an anonymous {@link StoredProcedure} <code>IN</code> parameter with {@link JDBCType#JAVA_OBJECT} type
      *
      * @param value parameter value
      * @param <T>   parameter value type
@@ -75,7 +75,7 @@ public final class P<T> {
     }
 
     /**
-     * Creates a {@link StoredProcedure} <code>IN</code> parameter.
+     * Creates a {@link StoredProcedure} <code>IN</code> parameter
      *
      * @param type  parameter type
      * @param value parameter value
@@ -88,7 +88,7 @@ public final class P<T> {
     }
 
     /**
-     * Creates a {@link StoredProcedure} <code>IN</code> parameter with {@link JDBCType#JAVA_OBJECT} type.
+     * Creates a {@link StoredProcedure} <code>IN</code> parameter with {@link JDBCType#JAVA_OBJECT} type
      *
      * @param name  parameter name
      * @param value parameter value
@@ -101,7 +101,7 @@ public final class P<T> {
     }
 
     /**
-     * Creates a {@link StoredProcedure} <code>OUT</code> parameter.
+     * Creates a {@link StoredProcedure} <code>OUT</code> parameter
      *
      * @param type parameter type
      * @param name parameter name
@@ -114,7 +114,7 @@ public final class P<T> {
     }
 
     /**
-     * Creates a {@link StoredProcedure} <code>OUT</code> parameter.
+     * Creates a {@link StoredProcedure} <code>OUT</code> parameter
      *
      * @param type parameter type
      * @param <T>  parameter value type
@@ -126,7 +126,7 @@ public final class P<T> {
     }
 
     /**
-     * Creates a {@link StoredProcedure} <code>OUT</code> parameter with {@link JDBCType#JAVA_OBJECT} type.
+     * Creates a {@link StoredProcedure} <code>OUT</code> parameter with {@link JDBCType#JAVA_OBJECT} type
      *
      * @param name parameter name
      * @param <T>  parameter value type
@@ -138,7 +138,7 @@ public final class P<T> {
     }
 
     /**
-     * Creates a {@link StoredProcedure} <code>OUT</code> parameter.
+     * Creates a {@link StoredProcedure} <code>OUT</code> parameter
      *
      * @param type  parameter type
      * @param name  parameter name
@@ -152,7 +152,7 @@ public final class P<T> {
     }
 
     /**
-     * Creates a {@link StoredProcedure} <code>OUT</code> parameter.
+     * Creates a {@link StoredProcedure} <code>OUT</code> parameter
      *
      * @param type  parameter type
      * @param value parameter value
@@ -165,7 +165,7 @@ public final class P<T> {
     }
 
     /**
-     * Creates a {@link StoredProcedure} <code>INOUT</code> parameter.
+     * Creates a {@link StoredProcedure} <code>INOUT</code> parameter
      *
      * @param name  parameter name
      * @param value parameter value
@@ -178,7 +178,7 @@ public final class P<T> {
     }
 
     /**
-     * Creates a {@link StoredProcedure} <code>INOUT</code> parameter with {@link JDBCType#JAVA_OBJECT} type.
+     * Creates a {@link StoredProcedure} <code>INOUT</code> parameter with {@link JDBCType#JAVA_OBJECT} type
      *
      * @param value parameter value
      * @param <T>   parameter value type
@@ -190,9 +190,9 @@ public final class P<T> {
     }
 
     /**
-     * Test if this is an <code>IN</code> parameter.
+     * Test if this is an <code>IN</code> parameter
      *
-     * @return true if this is <code>IN</code>, false - otherwise.
+     * @return true if this is <code>IN</code>, false - otherwise
      * @see ParameterMetaData#parameterModeIn
      */
     public boolean isIn() {
@@ -200,9 +200,9 @@ public final class P<T> {
     }
 
     /**
-     * Test if this is an <code>OUT</code> parameter.
+     * Test if this is an <code>OUT</code> parameter
      *
-     * @return true if this is <code>OUT</code>, false - otherwise.
+     * @return true if this is <code>OUT</code>, false - otherwise
      * @see ParameterMetaData#parameterModeOut
      */
     public boolean isOut() {
@@ -210,9 +210,9 @@ public final class P<T> {
     }
 
     /**
-     * Test if this is an <code>INOUT</code> parameter.
+     * Test if this is an <code>INOUT</code> parameter
      *
-     * @return true if this is <code>INOUT</code> parameter, false - otherwise.
+     * @return true if this is <code>INOUT</code> parameter, false - otherwise
      * @see ParameterMetaData#parameterModeInOut
      */
     public boolean isInOut() {
@@ -220,7 +220,7 @@ public final class P<T> {
     }
 
     /**
-     * Returns the name of this parameter.
+     * Returns the name of this parameter
      *
      * @return parameter name
      */
@@ -230,7 +230,7 @@ public final class P<T> {
     }
 
     /**
-     * Returns the value of this parameter.
+     * Returns the value of this parameter
      *
      * @return parameter value
      */
@@ -240,7 +240,7 @@ public final class P<T> {
     }
 
     /**
-     * Returns an {@link SQLType} of this parameter.
+     * Returns an {@link SQLType} of this parameter
      *
      * @return parameter type
      */

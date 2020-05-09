@@ -40,8 +40,8 @@ public class SQLRuntimeException extends RuntimeException {
     }
 
     /**
-     * Constructs a new runtime exception with provided string as its detail message.
-     * <br/>If <code>fillInStackTrace</code> parameter is set to <code>true</code> then stack trace is filled in, otherwise - not.
+     * Constructs a new runtime exception with provided string as its detail message
+     * <br/>If <code>fillInStackTrace</code> parameter is set to <code>true</code> then stack trace is filled in, otherwise - not
      *
      * @param message exception message string
      * @param fillInStackTrace whether to fill in stack trace or not
@@ -67,6 +67,9 @@ public class SQLRuntimeException extends RuntimeException {
         super(cause);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public String getMessage() {
         return message;

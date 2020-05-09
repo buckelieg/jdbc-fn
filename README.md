@@ -4,10 +4,10 @@
 [![javadoc](https://javadoc.io/badge2/com.github.buckelieg/jdbc-fn/javadoc.svg)](https://javadoc.io/doc/com.github.buckelieg/jdbc-fn)
 # jdbc-fn
 Functional style programming over plain JDBC.
-+ Execute SQL SELECT query and process results with Java Stream API.
-+ Fire SQL UPDATE(S) batch(es) in a single line of code.
-+ Invoke stored procedures and retrieve its results without dealing with SQLExceptions
-+ Execute parameterized scripts.
++ Execute SQL [SELECT](#select) query and process results with Java Stream API.
++ Fire SQL [UPDATE(S)](#update) [batch(es)](#batch-mode) in a single line of code.
++ Invoke [stored procedures](#stored-procedures) and retrieve its results without dealing with SQLExceptions
++ Execute parameterized [scripts](#scripts).
 
 And more...
 
@@ -17,21 +17,17 @@ Add maven dependency:
 <dependency>
   <groupId>com.github.buckelieg</groupId>
   <artifactId>jdbc-fn</artifactId>
-  <version>0.3.11</version>
+  <version>0.4</version>
 </dependency>
 ```
 
-#### Setup database
-There are several options to set up the things:
+### Setup database
+There are a couple of ways to set up the things:
 ```java
-// 1. Provide connection URL
-DB db = new DB("vendor-specific-string");
-// 2. Provide connection itself
-DB db = new DB(DriverManager.getConnection("vendor-specific-string"));
-// 3. Provide DataSource
+// 1. Provide DataSource
 DataSource ds = // obtain ds (e.g. via JNDI or other way) 
 DB db = new DB(ds);
-// 4. Provide connection supplier
+// 2. Provide connection supplier
 DB db = new DB(ds::getConnection);
 // or
 DB db = new DB(() -> {/*sophisticated connection supplier function*/});
@@ -44,13 +40,20 @@ try (DB db = new DB(/*init*/)) {
     
 }
 ```
-#### Select
-Operate on result set in a functional way.
+Note that providing connection supplier function with plain connection 
+<br/>like this: <code>DB db = new DB(() -> connection));</code> 
+<br/>or this: &nbsp;&nbsp;<code>DB db = new DB(() -> DriverManager.getConnection("vendor-specific-string"));</code> 
+<br/> e.g - if supplier function always return the same connection
+<br/>the concept of transactions will be partially broken: see [Transactions](#transactions) section.
+
+### Select
 Use question marks:
 ```java
-Collection<T> results = db.select("SELECT * FROM TEST WHERE ID IN (?, ?)", 1, 2).execute(rs ->{/*map rs here*/}).collect(Collectors.toList());
-// or use shorthands
-Collection<T> results = db.select("SELECT * FROM TEST WHERE ID IN (?, ?)", 1, 2).list(rs ->{/*map rs here*/});
+Collection<T> results = db.select("SELECT * FROM TEST WHERE ID IN (?, ?)", 1, 2).execute(rs ->{/*map ResultSet here*/}).collect(Collectors.toList());
+// an alias for execute method is stream - for better readability
+Collection<T> results = db.select("SELECT * FROM TEST WHERE ID IN (?, ?)", 1, 2).stream(rs ->{/*map ResultSet here*/}).collect(Collectors.toList());
+// or use shorthands for stream reduction
+Collection<T> results = db.select("SELECT * FROM TEST WHERE ID IN (?, ?)", 1, 2).list(rs ->{/*map ResultSet here*/});
 ```
 or use named parameters:
 ```java
@@ -77,12 +80,7 @@ Collection<T> results = db.select("SELECT * FROM TEST WHERE 1=1 AND ID IN (:ID) 
 ```
 Parameter names are CASE SENSITIVE! 'Name' and 'name' are considered different parameter names.
 
-#### Update/Insert/Delete
-
-These operations could be run in batch mode. Just supply an array of parameters and it will be processed in a single transaction.
-
-##### Insert 
-
+### Insert 
 with question marks:
 ```java
 long res = db.update("INSERT INTO TEST(name) VALUES(?)", "New_Name").execute();
@@ -91,7 +89,7 @@ Or with named parameters:
 ```java
 long res = db.update("INSERT INTO TEST(name) VALUES(:name)", new SimpleImmutableEntry<>("name","New_Name")).execute();
 ```
-##### Update
+### Update
 ```java
 long res = db.update("UPDATE TEST SET NAME=? WHERE NAME=?", "new_name_2", "name_2").execute();
 ```
@@ -102,16 +100,17 @@ long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name",
   new SimpleImmutableEntry<>("new_name", "name_2")
 ).execute();
 ```
+###### Batch mode
 For batch operation use:
 ```java
-long res = db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"} }).execute();
+long res = db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"} }).batch(true).execute();
 ```  
-##### Delete
+### Delete
 ```java
 long res = db.update("DELETE FROM TEST WHERE name=?", "name_2").execute();
 ```
 
-#### Stored Procedures
+### Stored Procedures
 Invoking stored procedures is also quite simple:
 ```java
 String name = db.procedure("{call GETNAMEBYID(?,?)}", P.in(12), P.out(JDBCType.VARCHAR)).call(cs -> cs.getString(2)).orElse("Unknown");
@@ -130,18 +129,19 @@ db.script("CREATE TABLE TEST (id INTEGER NOT NULL, name VARCHAR(255));INSERT INT
 ```java
   db.script(new File("path/to/script.sql")).timeout(60).execute();
 ```
-<br/>Script can contain single- and multiline comments. Each statement must be separated by semicolon (";").
+<br/>Script can contain single- and multiline comments. 
+<br/>Each statement must be separated by a semicolon (";").
 <br/>Script execution results ignored and not handled after all.
 
 Note that scripts support named parameters and JDBC-like procedure call statements.
 
 ### Transactions
-There are couple of methods provide transaction support.
+There are a couple of methods provide transaction support.
 <br/>Tell whether to create new transaction or not, provide isolation level and transaction logic function.
-<br/>See example below.
+
 ```java
 // suppose we have to insert a bunch of new users by name and get the latest one filled with its attributes....
-User latestUser = db.transaction(false, TransactionIsolation.READ_UNCOMMITTED, db ->
+User latestUser = db.transaction(false, TransactionIsolation.READ_UNCOMMITTED, () ->
   db.update("INSERT INTO users(name) VALUES(?)", "name1", "name2", "name3", ...)
     .skipWarnings(false)
     .timeout(10, TimeUnit.MINUTES)
@@ -161,6 +161,7 @@ User latestUser = db.transaction(false, TransactionIsolation.READ_UNCOMMITTED, d
     .orElse(null)
 );
 ```
+When calling <code>transaction()</code> method <code>createNew</code> flag (if set to <code>true</code>) implies obtaining new connection via <code>DataSource</code> or connection supplier function provided at the <code>DB</code> class [initialization](#setup-database) stage.
 ### Logging & Debugging
 Convenient logging methods provided.
 ```java
@@ -171,7 +172,8 @@ The above will print a current query to provided logger with debug method.
 <br/>Note that all provided parameters will be substituted with corresponding values so this case will output:
 <br/><code>SELECT * FROM TEST WHERE id=7</code>
 <br/>Calling <code>print()</code> without arguments will do the same with standard output.
-#### Scripts logging
+
+###### Scripts logging
 For <code>Script</code> query <code>verbose()</code> method can be used to track current script query execution.
 ```java
 db.script("SELECT * FROM TEST WHERE id=:id;DROP TABLE TEST", new SimpleImmutableEntry<>("id", 5)).verbose().execute();
@@ -183,7 +185,7 @@ This will print out to standard output two lines:
 <br/>Calling <code>print()</code> on <code>Script</code> will print out the whole sql script with parameters substituted.
 <br/>Custom logging handler may also be provided for both cases.
 
-### Going simpler
+### Going simple...
 For cases when it is all about query execution on existing connection with no tuning, logging and other stuff the <code>Queries</code> helper class can be used.
 <br/>For example:
 ```java
@@ -218,6 +220,7 @@ List<Map<String, Object>> names = Queries.list("SELECT name FROM TEST WHERE id I
 ```
 So that there are minimum efforts to obtain data from database.
 <br/>Note that connection must be closed explicitly after using <code>Queries</code> helper.
+
 ### Prerequisites
 Java8, Maven, Appropriate JDBC driver.
 

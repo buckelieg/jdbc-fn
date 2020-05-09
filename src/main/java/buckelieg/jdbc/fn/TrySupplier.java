@@ -18,9 +18,9 @@ package buckelieg.jdbc.fn;
 import static java.util.Objects.requireNonNull;
 
 /**
- * No-argument function which returns a result that might throw an exception.
- * <br/>There is no requirement that a new or distinct result be returned each time the function is invoked.
- * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #get()}.
+ * No-argument function which returns a result that might throw an exception
+ * <br/>There is no requirement that a new or distinct result be returned each time the function is invoked
+ * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #get()}
  *
  * @param <O> the type of results supplied by this supplier
  * @param <E> a type of an {@link Exception} that might be thrown
@@ -37,7 +37,7 @@ public interface TrySupplier<O, E extends Throwable> {
     O get() throws E;
 
     /**
-     * Returns reference of lambda expression.
+     * Returns reference of lambda expression
      *
      * @param trySupplier a supplier function
      * @return lambda as {@link TrySupplier} reference

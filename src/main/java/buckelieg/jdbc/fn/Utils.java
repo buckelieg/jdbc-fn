@@ -211,8 +211,8 @@ final class Utils {
         return new SQLRuntimeException(message.toString().trim(), false);
     }
 
-    static <T> T doInTransaction(Connection conn, TransactionIsolation isolationLevel, TryFunction<Connection, T, SQLException> action) throws SQLException {
-        requireNonNull(conn, "Connection must be provided");
+    static <T> T doInTransaction(TrySupplier<Connection, SQLException> connectionSupplier, TransactionIsolation isolationLevel, TrySupplier<T, SQLException> action) throws SQLException {
+        Connection conn = requireNonNull(connectionSupplier.get(), "Connection must be provided");
         boolean autoCommit = true;
         Savepoint savepoint = null;
         int isolation = conn.getTransactionIsolation();
@@ -224,7 +224,7 @@ final class Utils {
             if (isolationLevel != null && isolation != isolationLevel.level && conn.getMetaData().supportsTransactionIsolationLevel(isolationLevel.level)) {
                 conn.setTransactionIsolation(isolationLevel.level);
             }
-            result = requireNonNull(action, "Action must be provided").apply(conn);
+            result = requireNonNull(action, "Action must be provided").get();
             conn.commit();
             return result;
         } catch (SQLException e) {

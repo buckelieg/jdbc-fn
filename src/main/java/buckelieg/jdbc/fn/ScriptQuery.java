@@ -59,7 +59,6 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     private boolean skipWarnings = true;
     private boolean poolable;
     private Consumer<SQLException> errorHandler = NOOP;
-    private String delimiter = STATEMENT_DELIMITER;
 
     private Query currentQuery;
 
@@ -85,8 +84,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
      */
     @Nonnull
     @Override
-    public Long execute(String delimiter) {
-        this.delimiter = requireNonNull(delimiter, "Statement delimiter must be provided");
+    public Long execute() {
         try {
             if (timeout == 0) {
                 return doExecute();
@@ -102,7 +100,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
 
     private long doExecute() throws SQLException {
         long start = currentTimeMillis();
-        for (String query : script.split(delimiter)) {
+        for (String query : script.split(STATEMENT_DELIMITER)) {
             try {
                 if (isAnonymous(query)) {
                     if (isProcedure(query)) {

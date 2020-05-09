@@ -4,7 +4,7 @@
 
     <groupId>com.github.buckelieg</groupId>
     <artifactId>jdbc-fn</artifactId>
-    <version>0.3.11-SNAPSHOT</version>
+    <version>0.4-SNAPSHOT</version>
 
     <packaging>jar</packaging>
 
@@ -22,9 +22,9 @@
     </licenses>
 
     <scm>
-        <url>http://buckelieg.github.io/db-fn/</url>
-        <connection>scm:git:git@github.com:buckelieg/db-fn.git</connection>
-        <developerConnection>scm:git:git@github.com:buckelieg/db-fn.git</developerConnection>
+        <url>http://buckelieg.github.io/jdbc-fn/</url>
+        <connection>scm:git:git@github.com:buckelieg/jdbc-fn.git</connection>
+        <developerConnection>scm:git:git@github.com:buckelieg/jdbc-fn.git</developerConnection>
         <tag>HEAD</tag>
     </scm>
 

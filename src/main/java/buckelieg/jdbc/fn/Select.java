@@ -39,8 +39,8 @@ import static java.util.stream.Collectors.toList;
 public interface Select extends Query {
 
     /**
-     * In cases when single result of SELECT statement is expected.
-     * <br/>Like <code>SELECT COUNT(*) FROM TABLE_NAME</code> etc...
+     * In cases when single result of SELECT statement is expected
+     * <br/>Like <code>SELECT COUNT(*) FROM TABLE_NAME</code> etc.
      *
      * @param mapper ResultSet mapper function
      * @throws NullPointerException if mapper is null
@@ -70,13 +70,13 @@ public interface Select extends Query {
     }
 
     /**
-     * Stream abstraction over ResultSet.
+     * Stream abstraction over ResultSet
      * <br/>Note:
      * Whenever we left stream without calling some 'reduction' (terminal) operation we left resource freeing to JDBC
      * <br/><code>stream().iterator().next().get(...)</code>
-     * <br/>Thus there could be none or some rows more, but result set (and a statement) would not be closed forcibly.
-     * <br/>In such cases we rely on JDBC resources auto closing mechanism.
-     * <br/>And it is strongly recommended to use <code>single</code> method for the cases above.
+     * <br/>Thus there could be none or some rows more, but result set (and a statement) would not be closed forcibly
+     * <br/>In such cases we rely on JDBC resources auto closing mechanism
+     * <br/>And it is strongly recommended to use <code>single</code> method for the cases above
      *
      * @return a {@link Stream} over {@link ResultSet}
      * @see #single(TryFunction)
@@ -87,7 +87,7 @@ public interface Select extends Query {
     }
 
     /**
-     * Shorthand for stream mapping.
+     * Shorthand for stream mapping
      *
      * @param mapper result set mapper which is not required to handle {@link SQLException}
      * @return a {@link Stream} over mapped {@link ResultSet}
@@ -99,7 +99,7 @@ public interface Select extends Query {
     <T> Stream<T> execute(TryFunction<ResultSet, T, SQLException> mapper);
 
     /**
-     * An alias for {@link #execute(TryFunction)} method.
+     * An alias for {@link #execute(TryFunction)} method
      *
      * @param mapper result set mapper which is not required to handle {@link SQLException}
      * @return a {@link Stream} over mapped {@link ResultSet}
@@ -111,7 +111,7 @@ public interface Select extends Query {
     }
 
     /**
-     * An alias for {@link #execute()} method.
+     * An alias for {@link #execute()} method
      *
      * @return a {@link Stream} of {@link Map}s
      * @see #execute()
@@ -122,7 +122,7 @@ public interface Select extends Query {
     }
 
     /**
-     * Shorthand for stream mapping for list.
+     * Shorthand for stream mapping for list
      *
      * @param mapper result set mapper which is not required to handle {@link SQLException}
      * @return a {@link List} over mapped {@link ResultSet}
@@ -133,7 +133,7 @@ public interface Select extends Query {
     }
 
     /**
-     * Shorthand for stream mapping for list.
+     * Shorthand for stream mapping for list
      *
      * @return a {@link Map} with key-value pairs
      */
@@ -145,7 +145,7 @@ public interface Select extends Query {
     /**
      * Configures {@link java.sql.Statement} fetch size parameter
      *
-     * @param size desired fetch size. Should be greater than 0.
+     * @param size desired fetch size. Should be greater than 0
      * @return select query abstraction
      * @see java.sql.Statement#setFetchSize(int)
      * @see ResultSet#setFetchSize(int)
@@ -154,7 +154,7 @@ public interface Select extends Query {
     Select fetchSize(int size);
 
     /**
-     * Updates max rows obtained with this query.
+     * Updates max rows obtained with this query
      *
      * @param max rows number limit
      * @return select query abstraction
