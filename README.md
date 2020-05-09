@@ -129,7 +129,7 @@ db.script("CREATE TABLE TEST (id INTEGER NOT NULL, name VARCHAR(255));INSERT INT
 ```java
   db.script(new File("path/to/script.sql")).timeout(60).execute();
 ```
-<br/>Script can contain single- and multiline comments. 
+Script can contain single- and multiline comments. 
 <br/>Each statement must be separated by a semicolon (";").
 <br/>Script execution results ignored and not handled after all.
 
@@ -141,7 +141,7 @@ There are a couple of methods provide transaction support.
 
 ```java
 // suppose we have to insert a bunch of new users by name and get the latest one filled with its attributes....
-User latestUser = db.transaction(false, TransactionIsolation.READ_UNCOMMITTED, () ->
+User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, () ->
   db.update("INSERT INTO users(name) VALUES(?)", "name1", "name2", "name3", ...)
     .skipWarnings(false)
     .timeout(10, TimeUnit.MINUTES)
