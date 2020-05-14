@@ -20,7 +20,7 @@ import static java.util.Objects.requireNonNull;
 /**
  * Two-argument function with returned result that might throw an exception
  * <br/>There is no requirement that a new or distinct result be returned each time the function is invoked
- * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #apply(Object, Object)}}
+ * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #apply(Object, Object)}
  *
  * @param <I1> first input argument type
  * @param <I2> second input argument type

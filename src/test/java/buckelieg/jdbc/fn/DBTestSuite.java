@@ -420,7 +420,7 @@ public class DBTestSuite {
     @Test
     public void testTransactions() throws Exception {
         Long result = db.transaction(false, TransactionIsolation.SERIALIZABLE, () ->
-                db.update("INSERT INTO test(name) VALUES(?)", "name")
+                db.update("INSERT INTO test(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
                         .skipWarnings(false)
                         .timeout(1, TimeUnit.MINUTES)
                         .print()
@@ -431,7 +431,7 @@ public class DBTestSuite {
                         .orElse(null)
         );
         System.out.println(db.select("SELECT * FROM test WHERE id=?", result).single());
-        assertEquals(Long.valueOf(11L), result);
+        assertEquals(Long.valueOf(13L), result);
     }
 
     @Test

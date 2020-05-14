@@ -28,7 +28,7 @@ import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 
 /**
- * An abstraction for STORED PROCEDURE call statement
+ * An abstraction for STORED PROCEDURE CALL statement
  */
 @ParametersAreNonnullByDefault
 public interface StoredProcedure extends Select {

@@ -19,7 +19,7 @@ import static java.util.Objects.requireNonNull;
 
 /**
  * No-argument function which return no result that might throw an exception
- * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #doTry()}}
+ * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #doTry()}
  *
  * @param <E> exception type
  */

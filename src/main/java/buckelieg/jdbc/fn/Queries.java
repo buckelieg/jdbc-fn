@@ -45,6 +45,12 @@ public final class Queries {
 
     private static volatile DB db;
 
+    /**
+     * Sets connection to be used with connection-less parameters functions
+     *
+     * @param connection a connection to set (must be not null)
+     * @throws NullPointerException if connection is null
+     */
     public static synchronized void setConnection(Connection connection) {
         Queries.db = new DB(requireNonNull(connection, "Connection must be provided."));
     }
@@ -56,7 +62,7 @@ public final class Queries {
      * @param mapper <code>{@link ResultSet}</code> to value mapper
      * @param query  a query to execute against provided connection
      * @param params query parameters (if any)
-     * @param <T> result parameter type
+     * @param <T>    result parameter type
      * @return a <code>{@link List}</code> of mapped values
      */
     @Nonnull
@@ -71,7 +77,7 @@ public final class Queries {
      * @param mapper <code>{@link ResultSet}</code> to value mapper
      * @param query  a query to execute against previously provided connection
      * @param params query parameters (if any)
-     * @param <T> result parameter type
+     * @param <T>    result parameter type
      * @return a <code>{@link List}</code> of mapped values
      */
     @Nonnull
@@ -110,9 +116,9 @@ public final class Queries {
      * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param mapper <code>{@link ResultSet}</code> to value mapper
-     * @param query a query to execute against previously provided connection
+     * @param query  a query to execute against previously provided connection
      * @param params query parameters (if any)
-     * @param <T> result parameter type
+     * @param <T>    result parameter type
      * @return a <code>{@link List}</code> of mapped values
      */
     @Nonnull
@@ -124,7 +130,7 @@ public final class Queries {
      * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection
      * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
-     * @param query a query to execute against previously provided connection
+     * @param query  a query to execute against previously provided connection
      * @param params query parameters (if any)
      * @return a <code>{@link List}</code> of {@link Map}s
      */
@@ -138,9 +144,9 @@ public final class Queries {
      * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
      * @param mapper <code>{@link ResultSet}</code> to value mapper
-     * @param query a query to execute against previously provided connection
+     * @param query  a query to execute against previously provided connection
      * @param params query parameters (if any)
-     * @param <T> result parameter type
+     * @param <T>    result parameter type
      * @return a <code>{@link List}</code> of mapped values
      */
     @SafeVarargs
@@ -153,7 +159,7 @@ public final class Queries {
      * Obtains a <code>{@link List}</code> of {@link Map}s from previously provided connection
      * <br/>The connection MUST be set via <code>{@link Queries#setConnection(Connection)}</code> method PRIOR calling this method
      *
-     * @param query a query to execute against previously provided connection
+     * @param query  a query to execute against previously provided connection
      * @param params query parameters (if any)
      * @return a <code>{@link List}</code> of {@link Map}s
      */

@@ -103,7 +103,7 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
 
     @Override
     CallableStatement prepareStatement(Connection connection, String query, Object... params) throws SQLException {
-        CallableStatement cs = requireNonNull(connection, "Connection must be provided").prepareCall(query);
+        CallableStatement cs = connection.prepareCall(query);
         for (int i = 1; i <= params.length; i++) {
             P<?> p = (P<?>) params[i - 1];
             if (p.isOut() || p.isInOut()) {

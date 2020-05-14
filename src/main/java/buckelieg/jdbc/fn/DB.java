@@ -429,11 +429,11 @@ public final class DB implements AutoCloseable {
      * <br/>Example usage:
      * <pre>{@code
      *  // suppose we have to create a bunch of new users with provided names and get the latest with all it's attributes filled in
-     *  DB db = new DB("connectionUrl");
+     *  DB db = new DB(ds);
      *  User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, () ->
-     *      db.update("INSERT INTO users(name) VALUES(?)", "name1", "name2", "name3", ...)
+     *      db.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
      *        .skipWarnings(false)
-     *        .timeout(10, TimeUnit.MINUTES)
+     *        .timeout(1, TimeUnit.MINUTES)
      *        .print()
      *        .execute(
      *              rs -> rs.getLong(1),
@@ -451,7 +451,7 @@ public final class DB implements AutoCloseable {
      *          .orElse(null);
      * }</pre>
      * Note that return value must not be an opened cursor, so that code below will throw an exception of Invalid transaction state - held cursor requires same isolation level:
-     * <pre>{@code Stream<String> stream = db.transaction(false, TransactionIsolation.SERIALIZABLE, db -> db.select("SELECT * FROM my_table").execute(rs -> rs.getString(1)));
+     * <pre>{@code Stream<String> stream = db.transaction(false, TransactionIsolation.SERIALIZABLE, () -> db.select("SELECT * FROM my_table").execute(rs -> rs.getString(1)));
      * stream.collect(Collectors.toList());}</pre>
      * Unless desired isolation level matches the RDBMS default one
      * <br/>If transaction isolation level is not supported by RDBMS then default one will be used

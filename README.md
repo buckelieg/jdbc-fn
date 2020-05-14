@@ -103,7 +103,7 @@ long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name",
 ###### Batch mode
 For batch operation use:
 ```java
-long res = db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"} }).batch(true).execute();
+long res = db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"} }).execute();
 ```  
 ### Delete
 ```java
@@ -142,9 +142,9 @@ There are a couple of methods provide transaction support.
 ```java
 // suppose we have to insert a bunch of new users by name and get the latest one filled with its attributes....
 User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, () ->
-  db.update("INSERT INTO users(name) VALUES(?)", "name1", "name2", "name3", ...)
+  db.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
     .skipWarnings(false)
-    .timeout(10, TimeUnit.MINUTES)
+    .timeout(1, TimeUnit.MINUTES)
     .print()
     .execute(
         rs -> rs.getLong(1),

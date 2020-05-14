@@ -49,12 +49,8 @@ public interface Update extends Query {
      * <br/>Example:
      * <pre>{@code
      * List<Object> list = db.execute(
-     *      rs -> new Object[] {
-     *          rs.getLong(1),
-     *          rs.getString(2),
-     *          rs.getObject(3)
-     *      },
-     *      streamOfObjects -> streamOfObjects.collect(Collectors.toList())
+     *      rs -> rs.getLong(1),
+     *      streamOfLongs -> streamOfLongs.collect(Collectors.toList())
      * )}</pre>
      *
      * @param valueMapper generated values <code>ResultSet</code> mapper function
@@ -72,13 +68,9 @@ public interface Update extends Query {
      * <br/>Example:
      * <pre>{@code
      * List<Object> list = db.execute(
-     *      rs -> new Object[] {
-     *          rs.getLong(1),
-     *          rs.getString(2),
-     *          rs.getObject(3)
-     *      },
-     *      streamOfObjects -> streamOfObjects.collect(Collectors.toList()),
-     *      "id", "hash", "myGeneratedValueColumn"
+     *      rs -> rs.getLong(1),
+     *      streamOfLongs -> streamOfLongs.collect(Collectors.toList()),
+     *      "id"
      * )}</pre>
      *
      * @param valueMapper generated values <code>ResultSet</code> mapper function
@@ -98,13 +90,9 @@ public interface Update extends Query {
      * <br/>Example:
      * <pre>{@code
      * List<Object> list = db.execute(
-     *      rs -> new Object[] {
-     *          rs.getLong(1),
-     *          rs.getString(2),
-     *          rs.getObject(5)
-     *      },
-     *      streamOfObjects -> streamOfObjects.collect(Collectors.toList()),
-     *      1, 2, 5
+     *      rs -> rs.getLong(1),
+     *      streamOfLongs -> streamOfLongs.collect(Collectors.toList()),
+     *      1
      * )}</pre>
      *
      * @param valueMapper generated values <code>ResultSet</code> mapper function
