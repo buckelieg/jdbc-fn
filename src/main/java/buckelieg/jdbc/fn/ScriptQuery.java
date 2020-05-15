@@ -37,7 +37,6 @@ import static java.util.Arrays.stream;
 import static java.util.Collections.emptyList;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.Executors.newSingleThreadExecutor;
-import static java.util.concurrent.TimeUnit.SECONDS;
 
 @NotThreadSafe
 @ParametersAreNonnullByDefault
@@ -53,14 +52,13 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     private String query;
     private ExecutorService conveyor;
     private int timeout;
+    private TimeUnit unit;
     private Consumer<String> logger;
     private boolean escaped = true;
     private boolean skipErrors = true;
     private boolean skipWarnings = true;
     private boolean poolable;
     private Consumer<SQLException> errorHandler = NOOP;
-
-    private Query currentQuery;
 
     /**
      * Creates script executor query
@@ -90,7 +88,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
                 return doExecute();
             }
             conveyor = newSingleThreadExecutor(); // TODO implement executor that uses current thread
-            return conveyor.submit(this::doExecute).get(timeout, SECONDS);
+            return conveyor.submit(this::doExecute).get(timeout, unit);
         } catch (Exception e) {
             throw newSQLRuntimeException(e);
         } finally {
@@ -99,49 +97,42 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     }
 
     private long doExecute() throws SQLException {
-        long start = currentTimeMillis();
-        for (String query : script.split(STATEMENT_DELIMITER)) {
-            try {
-                if (isAnonymous(query)) {
-                    if (isProcedure(query)) {
-                        executeProcedure(new StoredProcedureQuery(connection, query));
+        return doInTransaction(() -> connection, null, () -> {
+            long start = currentTimeMillis();
+            for (String query : script.split(STATEMENT_DELIMITER)) {
+                try {
+                    if (isAnonymous(query)) {
+                        if (isProcedure(query)) {
+                            executeProcedure(new StoredProcedureQuery(connection, query));
+                        } else {
+                            executeQuery(new QueryImpl(connection, query));
+                        }
                     } else {
-                        executeQuery(new QueryImpl(connection, query));
+                        Map.Entry<String, Object[]> preparedQuery = prepareQuery(query, params);
+                        if (isProcedure(preparedQuery.getKey())) {
+                            executeProcedure(new StoredProcedureQuery(connection, preparedQuery.getKey(), stream(preparedQuery.getValue()).map(p -> p instanceof P ? (P<?>) p : P.in(p)).toArray(P[]::new)));
+                        } else {
+                            executeQuery(new QueryImpl(connection, preparedQuery.getKey(), preparedQuery.getValue()));
+                        }
                     }
-                } else {
-                    Map.Entry<String, Object[]> preparedQuery = prepareQuery(query, params);
-                    if (isProcedure(preparedQuery.getKey())) {
-                        executeProcedure(new StoredProcedureQuery(connection, preparedQuery.getKey(), stream(preparedQuery.getValue()).map(p -> p instanceof P ? (P<?>) p : P.in(p)).toArray(P[]::new)));
+                } catch (Exception e) {
+                    if (skipErrors) {
+                        errorHandler.accept(new SQLException(e));
                     } else {
-                        executeQuery(new QueryImpl(connection, preparedQuery.getKey(), preparedQuery.getValue()));
+                        throw new SQLException(e);
                     }
-                }
-            } catch (Exception e) {
-                if (skipErrors) {
-                    errorHandler.accept(new SQLException(e));
-                } else {
-                    throw new SQLException(e);
                 }
             }
-        }
-        return currentTimeMillis() - start;
+            return currentTimeMillis() - start;
+        });
     }
 
     private void executeProcedure(StoredProcedure sp) {
-        withQuery(sp, () -> sp.skipWarnings(skipWarnings).print(this::log).call());
+        sp.skipWarnings(skipWarnings).print(this::log).call();
     }
 
     private void executeQuery(Query query) {
-        withQuery(query, () -> query.escaped(escaped).poolable(poolable).skipWarnings(skipWarnings).print(this::log).execute());
-    }
-
-    private <Q extends Query> void withQuery(Q query, Action action) {
-        try {
-            currentQuery = query;
-            action.execute();
-        } finally {
-            currentQuery = null;
-        }
+        query.escaped(escaped).poolable(poolable).skipWarnings(skipWarnings).print(this::log).execute();
     }
 
     private void log(String query) {
@@ -179,7 +170,8 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     @Nonnull
     @Override
     public Script timeout(int timeout, TimeUnit unit) {
-        this.timeout = max((int) requireNonNull(unit, "Time Unit must be provided").toSeconds(timeout), 0);
+        this.timeout = max(timeout, 0);
+        this.unit = requireNonNull(unit, "Time Unit must be provided");
         return this;
     }
 
@@ -212,7 +204,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     @Nonnull
     @Override
     public String asSQL() {
-        if(query == null) {
+        if (query == null) {
             Map.Entry<String, Object[]> preparedScript = prepareQuery(script, params);
             query = Utils.asSQL(preparedScript.getKey(), preparedScript.getValue());
         }
@@ -222,7 +214,6 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     @Override
     public void close() {
         if (conveyor != null) conveyor.shutdownNow();
-        if (currentQuery != null) currentQuery.close();
     }
 
     private interface Action {

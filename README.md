@@ -141,14 +141,17 @@ There are a couple of methods provide transaction support.
 
 ```java
 // suppose we have to insert a bunch of new users by name and get the latest one filled with its attributes....
-User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, db ->
-  db.update("INSERT INTO users(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"}, {"name3"} })
+User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, db1 ->
+  // here db.equals(db1) will return true
+  // but if we claim to createNew transaction it will not, because a new connection is obtained and new DB instance is created
+  // so everything inside a transaction MUST be done through db1 reference since it will operate on newly created connection.      
+  db1.update("INSERT INTO users(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"}, {"name3"} })
     .skipWarnings(false)
     .timeout(1, TimeUnit.MINUTES)
     .print()
     .execute(
         rs -> rs.getLong(1),
-        ids -> db.select("SELECT * FROM users WHERE id=?", ids.peek(id -> db.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call()).max(Comparator.comparing(i -> i)).orElse(-1L))
+        ids -> db1.select("SELECT * FROM users WHERE id=?", ids.peek(id -> db1.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call()).max(Comparator.comparing(i -> i)).orElse(-1L))
                  .print()
                  .single(rs -> {
                      User u = new User();

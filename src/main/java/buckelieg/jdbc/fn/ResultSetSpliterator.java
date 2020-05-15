@@ -33,7 +33,7 @@ final class ResultSetSpliterator implements Spliterator<ResultSet>, AutoCloseabl
 
     ResultSetSpliterator(@Nonnull TrySupplier<ResultSet, SQLException> supplier) {
         try {
-            this.rs = requireNonNull(requireNonNull(supplier, "ResultSet supplier must be provided").get(), "ResultSet must not be null");
+            this.rs = supplier.get();
         } catch (SQLException e) {
             throw newSQLRuntimeException(e);
         }

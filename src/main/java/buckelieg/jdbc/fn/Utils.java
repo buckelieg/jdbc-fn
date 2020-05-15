@@ -265,7 +265,6 @@ final class Utils {
     }
 
     static <S extends PreparedStatement> S setStatementParameters(S statement, Object... params) throws SQLException {
-        requireNonNull(params, "Parameters must be provided");
         int pNum = 0;
         for (Object p : params) {
             statement.setObject(++pNum, p); // introduce type conversion here?

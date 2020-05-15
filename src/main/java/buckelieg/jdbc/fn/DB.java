@@ -107,7 +107,7 @@ public final class DB implements AutoCloseable {
      * @param query           an SQL query to execute
      * @param namedParameters query named parameters in the form of :name
      * @return select query
-     * @throws IllegalArgumentException if provided query is a procedure call statement
+     * @throws IllegalArgumentException either if query string is a procedure call statement or it is not a single SQL statement
      * @see Select
      */
     @Nonnull
@@ -123,7 +123,7 @@ public final class DB implements AutoCloseable {
      * @param query           an arbitrary SQL query to execute
      * @param namedParameters query named parameters in the form of :name
      * @return select query
-     * @throws IllegalArgumentException if provided query is a procedure call statement
+     * @throws IllegalArgumentException either if query string is a procedure call statement or it is not a single SQL statement
      * @see Select
      */
     @SafeVarargs
@@ -320,11 +320,15 @@ public final class DB implements AutoCloseable {
      * @param query      a single arbitrary SQL query to execute
      * @param parameters query parameters in the declared order of '?'
      * @return an SQL query abstraction
+     * @throws IllegalArgumentException either if query string is a procedure call statement or it is not a single SQL statement
      */
     @Nonnull
     public Query query(String query, Object... parameters) {
         if (isProcedure(query)) {
-            throw new IllegalArgumentException(format("Query '%s' is not valid select statement", query));
+            throw new IllegalArgumentException(format("Query '%s' is not valid SQL statement", query));
+        }
+        if(cutComments(query).contains(STATEMENT_DELIMITER)) {
+            throw new IllegalArgumentException(format("Query '%s' is not a single one", query));
         }
         return new QueryImpl(getConnection(connectionSupplier), checkAnonymous(query), parameters);
     }
@@ -431,9 +435,9 @@ public final class DB implements AutoCloseable {
      *  // suppose we have to create a bunch of new users with provided names and get the latest with all it's attributes filled in
      *  DB db = new DB(ds);
      *  User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, db1 ->
-     *      // here db.equals(db1) == true
-     *      // but if we claim to createNew transaction it will not, because a new connection is obtained
-     *      // and everything inside a transaction MUST be done through db1 reference since it will operate on newly created connection.
+     *      // here db.equals(db1) will return true
+     *      // but if we claim to createNew transaction it will not, because a new connection is obtained and new DB instance is created
+     *      // so everything inside a transaction MUST be done through db1 reference since it will operate on newly created connection.
      *      db1.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
      *        .skipWarnings(false)
      *        .timeout(1, TimeUnit.MINUTES)
