@@ -142,7 +142,7 @@ There are a couple of methods provide transaction support.
 ```java
 // suppose we have to insert a bunch of new users by name and get the latest one filled with its attributes....
 User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, () ->
-  db.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
+  db.update("INSERT INTO users(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"}, {"name3"} })
     .skipWarnings(false)
     .timeout(1, TimeUnit.MINUTES)
     .print()
