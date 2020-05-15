@@ -430,14 +430,17 @@ public final class DB implements AutoCloseable {
      * <pre>{@code
      *  // suppose we have to create a bunch of new users with provided names and get the latest with all it's attributes filled in
      *  DB db = new DB(ds);
-     *  User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, () ->
-     *      db.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
+     *  User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, db1 ->
+     *      // here db.equals(db1) == true
+     *      // but if we claim to createNew transaction it will not, because a new connection is obtained
+     *      // and everything inside a transaction MUST be done through db1 reference since it will operate on newly created connection.
+     *      db1.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
      *        .skipWarnings(false)
      *        .timeout(1, TimeUnit.MINUTES)
      *        .print()
      *        .execute(
      *              rs -> rs.getLong(1),
-     *              keys -> db.select("SELECT * FROM users WHERE id=?", keys.peek(id -> db.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call()).max(Comparator.comparing(i -> i)).orElse(-1L))
+     *              keys -> db1.select("SELECT * FROM users WHERE id=?", keys.peek(id -> db1.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call()).max(Comparator.comparing(i -> i)).orElse(-1L))
      *                         .print()
      *                         .single(rs -> {
      *                              User u = new User();
@@ -465,9 +468,9 @@ public final class DB implements AutoCloseable {
      * @see TryFunction
      */
     @Nullable
-    public <T> T transaction(boolean createNew, @Nullable TransactionIsolation level, TrySupplier<T, SQLException> action) {
+    public <T> T transaction(boolean createNew, @Nullable TransactionIsolation level, TryFunction<DB, T, SQLException> action) {
         try {
-            return doInTransaction(createNew ? connectionSupplier : () -> getConnection(connectionSupplier), level, () -> requireNonNull(action, "Action must be provided").get());
+            return doInTransaction(createNew ? connectionSupplier : () -> getConnection(connectionSupplier), level, () -> requireNonNull(action, "Action must be provided").apply(createNew ? new DB(connectionSupplier) : this));
         } catch (SQLException e) {
             throw newSQLRuntimeException(e);
         }
@@ -480,10 +483,10 @@ public final class DB implements AutoCloseable {
      * @param action    an action to be performed in transaction
      * @return an arbitrary result
      * @throws NullPointerException if no action is provided
-     * @see #transaction(boolean, TransactionIsolation, TrySupplier)
+     * @see #transaction(boolean, TransactionIsolation, TryFunction)
      */
     @Nullable
-    public <T> T transaction(boolean createNew, TrySupplier<T, SQLException> action) {
+    public <T> T transaction(boolean createNew, TryFunction<DB, T, SQLException> action) {
         return transaction(createNew, null, action);
     }
 
@@ -493,10 +496,10 @@ public final class DB implements AutoCloseable {
      * @param action an action to be performed in transaction
      * @return an arbitrary result
      * @throws NullPointerException if no action is provided
-     * @see #transaction(boolean, TrySupplier)
+     * @see #transaction(boolean, TryFunction)
      */
     @Nullable
-    public <T> T transaction(TrySupplier<T, SQLException> action) {
+    public <T> T transaction(TryFunction<DB, T, SQLException> action) {
         return transaction(false, action);
     }
 

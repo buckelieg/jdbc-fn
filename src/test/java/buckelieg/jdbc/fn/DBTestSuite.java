@@ -419,7 +419,7 @@ public class DBTestSuite {
 
     @Test
     public void testTransactions() throws Exception {
-        Long result = db.transaction(false, TransactionIsolation.SERIALIZABLE, () ->
+        Long result = db.transaction(false, TransactionIsolation.SERIALIZABLE, db ->
                 db.update("INSERT INTO test(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
                         .skipWarnings(false)
                         .timeout(1, TimeUnit.MINUTES)
@@ -438,7 +438,7 @@ public class DBTestSuite {
     public void testTransactionException() throws Exception {
         Long countBefore = db.select("SELECT COUNT(*) FROM TEST").single(rs -> rs.getLong(1)).orElse(null);
         try {
-            db.transaction(false, TransactionIsolation.SERIALIZABLE, () -> {
+            db.transaction(false, TransactionIsolation.SERIALIZABLE, db -> {
                 db.update("INSERT INTO test(name) VALUES(?)", "name").execute();
                 throw new SQLException("Rollback!");
             });
@@ -452,11 +452,11 @@ public class DBTestSuite {
 
     @Test
     public void testNestedTransactions() throws Exception {
-        List<String> list = db.transaction(() ->
+        List<String> list = db.transaction(db ->
                 db.update("INSERT INTO test(name) VALUES(?)", "new_name").execute(
                         rs -> rs.getLong(1),
-                        ids -> db.transaction(() ->
-                                db.select("SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry<>("ids", ids.collect(toList()))).list(rs -> rs.getString(1))
+                        ids -> db.transaction(db1 ->
+                                db1.select("SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry<>("ids", ids.collect(toList()))).list(rs -> rs.getString(1))
                         )
                 )
         );
