@@ -90,7 +90,7 @@ abstract class AbstractQuery<S extends Statement> implements Query {
 
     final void jdbcTry(TryAction<SQLException> action) {
         try {
-            requireNonNull(action, "Action must be provided").doTry();
+            action.doTry();
         } catch (AbstractMethodError ame) {
             // ignore this possible vendor-specific JDBC driver's error.
         } catch (SQLException e) {

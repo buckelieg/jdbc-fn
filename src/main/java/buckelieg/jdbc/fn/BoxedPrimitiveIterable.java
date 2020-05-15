@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.lang.reflect.Array.get;
 import static java.lang.reflect.Array.getLength;
-import static java.util.Objects.requireNonNull;
 
 final class BoxedPrimitiveIterable implements Iterable<Number> {
 
@@ -29,7 +28,7 @@ final class BoxedPrimitiveIterable implements Iterable<Number> {
     private final int length;
 
     BoxedPrimitiveIterable(Object array) {
-        this.array = requireNonNull(array, "Array must be provided");
+        this.array = array;
         this.length = getLength(array);
     }
 
