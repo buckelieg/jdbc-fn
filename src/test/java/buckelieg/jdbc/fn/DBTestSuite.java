@@ -452,17 +452,19 @@ public class DBTestSuite {
 
     @Test
     public void testNestedTransactions() throws Exception {
-        List<String> list = db.transaction(db ->
-                db.update("INSERT INTO test(name) VALUES(?)", "new_name").execute(
-                        rs -> rs.getLong(1),
-                        ids -> db.transaction(db1 ->
-                                db1.select("SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry<>("ids", ids.collect(toList()))).list(rs -> rs.getString(1))
-                        )
-                )
-        );
+        List<String> list = db.transaction(db1 -> {
+            assertEquals(db, db1);
+            List<String> list1 = db1.update("INSERT INTO test(name) VALUES(?)", "new_name").execute(
+                    rs -> rs.getLong(1),
+                    ids -> db1.transaction(db2 -> db2.select("SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry<>("ids", ids.collect(toList()))).list(rs -> rs.getString(1)))
+            );
+            assertNotNull(list1);
+            assertEquals(1L, list1.size());
+            assertEquals("new_name", list1.iterator().next());
+            return db1.transaction(true, db2 -> db2.transaction(true, db3 -> db3.select("SELECT * FROM TEST").list(rs -> rs.getString(1))));
+        });
         assertNotNull(list);
-        assertEquals(1L, list.size());
-        assertEquals("new_name", list.iterator().next());
+        assertEquals(11L, list.size());
     }
 
     @Test

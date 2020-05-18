@@ -103,7 +103,7 @@ long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name",
 ###### Batch mode
 For batch operation use:
 ```java
-long res = db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"} }).execute();
+long res = db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"} }).batch(true).execute();
 ```  
 ### Delete
 ```java

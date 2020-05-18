@@ -16,7 +16,6 @@
 package buckelieg.jdbc.fn;
 
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import javax.annotation.ParametersAreNonnullByDefault;
 import javax.annotation.concurrent.NotThreadSafe;
 import java.sql.Connection;
@@ -32,6 +31,7 @@ import static buckelieg.jdbc.fn.Utils.*;
 import static java.sql.Statement.RETURN_GENERATED_KEYS;
 import static java.util.Arrays.stream;
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.joining;
 import static java.util.stream.Stream.of;
 
 @SuppressWarnings("unchecked")
@@ -43,44 +43,17 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
     private boolean isLarge;
     private boolean isBatch;
     private boolean isPoolable;
+    private boolean skipWarnings;
     private boolean isEscaped = true;
     private int timeout;
     private TimeUnit unit = TimeUnit.SECONDS;
-    private final String sql;
+    private int[] colIndices = null;
+    private String[] colNames = null;
+    private boolean useGeneratedKeys = false;
 
-    private UpdateQuery(String sqlString, TrySupplier<PreparedStatement, SQLException> prepareStatement, Connection connection, String query, Object[]... batch) {
+    UpdateQuery(Connection connection, String query, Object[]... batch) {
         super(connection, query, (Object) batch);
         this.batch = batch;
-        try {
-            this.statement = prepareStatement.get();
-        } catch (SQLException e) {
-            throw newSQLRuntimeException(e);
-        }
-        this.sql = sqlString;
-    }
-
-    UpdateQuery(String sqlString, Connection connection, String query, Object[]... batch) {
-        this(sqlString, () -> connection.prepareStatement(query), connection, query, batch);
-    }
-
-    UpdateQuery(String sqlString, @Nullable int[] colIndices, Connection connection, String query, Object[]... batch) {
-        this(
-                sqlString,
-                () -> colIndices == null || colIndices.length == 0 ?
-                        connection.prepareStatement(query, RETURN_GENERATED_KEYS) :
-                        connection.prepareStatement(query, colIndices),
-                connection, query, batch
-        );
-    }
-
-    UpdateQuery(String sqlString, @Nullable String[] colNames, Connection connection, String query, Object[]... batch) {
-        this(
-                sqlString,
-                () -> colNames == null || colNames.length == 0 ?
-                        connection.prepareStatement(query, RETURN_GENERATED_KEYS) :
-                        connection.prepareStatement(query, colNames),
-                connection, query, batch
-        );
     }
 
     @Override
@@ -120,7 +93,8 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
     @Nonnull
     @Override
     public Update skipWarnings(boolean skipWarnings) {
-        return setSkipWarnings(skipWarnings);
+        this.skipWarnings = skipWarnings;
+        return this;
     }
 
     @Nonnull
@@ -133,30 +107,46 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
     @Override
     public <T, K> T execute(TryFunction<ResultSet, K, SQLException> valueMapper, TryFunction<Stream<K>, T, SQLException> generatedValuesHandler) {
         requireNonNull(valueMapper, "Generated values mapper must be provided!");
-        return jdbcTry(() -> TryFunction.of(this::doExecute).andThen(count -> withStatement(s -> requireNonNull(generatedValuesHandler, "Generated values handler must be provided").apply(StreamSupport.stream(new ResultSetSpliterator(s::getGeneratedKeys), false).map(rs -> jdbcTry(() -> valueMapper.apply(rs))).onClose(this::close)))).apply(connection));
+        requireNonNull(generatedValuesHandler, "Generated values handler must be provided");
+        useGeneratedKeys = true;
+        return jdbcTry(() -> TryFunction.of(this::doExecute).andThen(count -> withStatement(s -> generatedValuesHandler.apply(StreamSupport.stream(new ResultSetSpliterator(s::getGeneratedKeys), false).map(rs -> jdbcTry(() -> valueMapper.apply(rs))).onClose(this::close)))).apply(connection));
     }
 
     @Nonnull
     @Override
     public <T, K> T execute(TryFunction<ResultSet, K, SQLException> valueMapper, TryFunction<Stream<K>, T, SQLException> generatedValuesHandler, String... colNames) {
+        this.colNames = requireNonNull(colNames, "Column names must be provided");
         return execute(valueMapper, generatedValuesHandler);
     }
 
     @Nonnull
     @Override
     public <T, K> T execute(TryFunction<ResultSet, K, SQLException> valueMapper, TryFunction<Stream<K>, T, SQLException> generatedValuesHandler, int... colIndices) {
+        this.colIndices = requireNonNull(colIndices, "Column indices must be provided");
         return execute(valueMapper, generatedValuesHandler);
     }
 
     @Nonnull
     public Long execute() {
-        return jdbcTry(() -> batch.length > 1 ? doInTransaction(() -> connection, null, () -> doExecute(connection)) : doExecute(connection));
+        return jdbcTry(() -> batch.length > 1 ? doInTransaction(() -> connection, null, this::doExecute) : doExecute(connection));
     }
 
     private long doExecute(Connection conn) throws SQLException {
+        if (useGeneratedKeys) {
+            if (colNames != null && colNames.length != 0) {
+                statement = conn.prepareStatement(query, colNames);
+            } else if (colIndices != null && colIndices.length != 0) {
+                statement = conn.prepareStatement(query, colIndices);
+            } else {
+                statement = conn.prepareStatement(query, RETURN_GENERATED_KEYS);
+            }
+        } else {
+            statement = conn.prepareStatement(query);
+        }
         setPoolable(isPoolable);
         setTimeout(timeout, unit);
         setEscapeProcessing(isEscaped);
+        setSkipWarnings(skipWarnings);
         return isBatch && conn.getMetaData().supportsBatchUpdates() ? executeBatch() : executeSimple();
     }
 
@@ -191,7 +181,7 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
 
     @Override
     final String asSQL(String query, Object... params) {
-        return sql;
+        return stream(params).flatMap(p -> of((Object[]) p)).map(p -> super.asSQL(query, (Object[]) p)).collect(joining(STATEMENT_DELIMITER));
     }
 
 }

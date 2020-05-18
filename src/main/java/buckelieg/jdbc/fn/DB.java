@@ -58,7 +58,12 @@ public final class DB implements AutoCloseable {
     private final TrySupplier<Connection, SQLException> connectionSupplier;
 
     DB(Connection connection) {
-        this(() -> requireNonNull(connection, "Connection must be provided"));
+        this(() -> connection);
+    }
+
+    private DB(Connection connection, TrySupplier<Connection, SQLException> connectionSupplier) {
+        this.connection = connection;
+        this.connectionSupplier = connectionSupplier;
     }
 
     /**
@@ -311,7 +316,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid DML statement", query));
         }
-        return new UpdateQueryDecorator(getConnection(connectionSupplier), checkAnonymous(query), batch);
+        return new UpdateQuery(getConnection(connectionSupplier), checkAnonymous(query), batch);
     }
 
     /**
@@ -327,7 +332,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid SQL statement", query));
         }
-        if(cutComments(query).contains(STATEMENT_DELIMITER)) {
+        if (cutComments(query).contains(STATEMENT_DELIMITER)) {
             throw new IllegalArgumentException(format("Query '%s' is not a single one", query));
         }
         return new QueryImpl(getConnection(connectionSupplier), checkAnonymous(query), parameters);
@@ -474,7 +479,7 @@ public final class DB implements AutoCloseable {
     @Nullable
     public <T> T transaction(boolean createNew, @Nullable TransactionIsolation level, TryFunction<DB, T, SQLException> action) {
         try {
-            return doInTransaction(createNew ? connectionSupplier : () -> getConnection(connectionSupplier), level, () -> requireNonNull(action, "Action must be provided").apply(createNew ? new DB(connectionSupplier) : this));
+            return doInTransaction(getConnectionSupplier(connectionSupplier, createNew), level, conn -> requireNonNull(action, "Action must be provided").apply(createNew ? new DB(conn, connectionSupplier) : this));
         } catch (SQLException e) {
             throw newSQLRuntimeException(e);
         }
@@ -524,21 +529,39 @@ public final class DB implements AutoCloseable {
         return toQuery.apply(preparedQuery.getKey(), preparedQuery.getValue());
     }
 
-    private Connection getConnection(TrySupplier<Connection, SQLException> supplier) {
-        try {
-            if (connection == null || connection.isClosed()) {
+    private TrySupplier<Connection, SQLException> getConnectionSupplier(TrySupplier<Connection, SQLException> supplier, boolean forceNew) {
+        return () -> {
+            if (forceNew) {
+                synchronized (this) {
+                    Connection newConnection = requireNonNull(supplier.get(), "Connection supplier must provide a connection");
+                    if (connection != null && connection == newConnection) {
+                        throw new UnsupportedOperationException("No new connection created");
+                    }
+                    if (newConnection.isClosed()) {
+                        throw new SQLException("Provided connection is already closed");
+                    }
+                    System.out.println(String.format("%s -> %s", connection, newConnection));
+                    connection = newConnection;
+                }
+            } else if (connection == null || connection.isClosed()) {
                 synchronized (this) {
                     if (connection == null || connection.isClosed()) {
-                        connection = requireNonNull(supplier.get(), "Connection supplier must provide non-null connection");
+                        connection = requireNonNull(supplier.get(), "Connection supplier must provide a connection");
                         if (connection.isClosed()) {
-                            throw new SQLException("Provided connection is already closed!");
+                            throw new SQLException("Provided connection is already closed");
                         }
                     }
                 }
             }
             return connection;
+        };
+    }
+
+    private Connection getConnection(TrySupplier<Connection, SQLException> supplier) {
+        try {
+            return getConnectionSupplier(supplier, false).get();
         } catch (SQLException e) {
-            throw new SQLRuntimeException(e);
+            throw newSQLRuntimeException(e);
         }
     }
 

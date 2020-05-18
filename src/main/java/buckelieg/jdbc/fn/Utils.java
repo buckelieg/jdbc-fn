@@ -211,7 +211,7 @@ final class Utils {
         return new SQLRuntimeException(message.toString().trim(), false);
     }
 
-    static <T> T doInTransaction(TrySupplier<Connection, SQLException> connectionSupplier, TransactionIsolation isolationLevel, TrySupplier<T, SQLException> action) throws SQLException {
+    static <T> T doInTransaction(TrySupplier<Connection, SQLException> connectionSupplier, TransactionIsolation isolationLevel, TryFunction<Connection, T, SQLException> action) throws SQLException {
         Connection conn = connectionSupplier.get();
         boolean autoCommit = true;
         Savepoint savepoint = null;
@@ -224,7 +224,7 @@ final class Utils {
             if (isolationLevel != null && isolation != isolationLevel.level && conn.getMetaData().supportsTransactionIsolationLevel(isolationLevel.level)) {
                 conn.setTransactionIsolation(isolationLevel.level);
             }
-            result = action.get();
+            result = action.apply(conn);
             conn.commit();
             return result;
         } catch (SQLException e) {
