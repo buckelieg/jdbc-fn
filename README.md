@@ -17,7 +17,7 @@ Add maven dependency:
 <dependency>
   <groupId>com.github.buckelieg</groupId>
   <artifactId>jdbc-fn</artifactId>
-  <version>0.1</version>
+  <version>0.2</version>
 </dependency>
 ```
 
