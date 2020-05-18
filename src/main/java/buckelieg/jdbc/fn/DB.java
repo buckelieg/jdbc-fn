@@ -540,7 +540,6 @@ public final class DB implements AutoCloseable {
                     if (newConnection.isClosed()) {
                         throw new SQLException("Provided connection is already closed");
                     }
-                    System.out.println(String.format("%s -> %s", connection, newConnection));
                     connection = newConnection;
                 }
             } else if (connection == null || connection.isClosed()) {
