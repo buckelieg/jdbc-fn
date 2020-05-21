@@ -31,7 +31,6 @@ import static java.lang.String.format;
 import static java.sql.JDBCType.*;
 import static java.util.Arrays.asList;
 import static java.util.Collections.singletonList;
-import static java.util.Objects.requireNonNull;
 import static java.util.Optional.empty;
 import static java.util.Optional.ofNullable;
 import static java.util.stream.Collectors.joining;
@@ -189,7 +188,7 @@ final class Utils {
     }
 
     static boolean isProcedure(String query) {
-        return STORED_PROCEDURE.matcher(requireNonNull(query, "SQL query must be provided")).matches();
+        return STORED_PROCEDURE.matcher(query).matches();
     }
 
     static String checkAnonymous(String query) {

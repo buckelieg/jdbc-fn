@@ -38,7 +38,7 @@ abstract class AbstractQuery<S extends Statement> implements Query {
 
     AbstractQuery(Connection connection, String query, Object... params) {
         try {
-            this.query = requireNonNull(query, "SQL query must be provided");
+            this.query = query;
             this.connection = connection;
             this.autoCommit = connection.getAutoCommit();
             this.statement = prepareStatement(connection, query, params);

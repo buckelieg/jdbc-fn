@@ -69,13 +69,13 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
      */
     ScriptQuery(Connection connection, String script, @Nullable Iterable<T> namedParams) {
         this.connection = connection;
-        this.script = requireNonNull(script, "Script string must be provided");
+        this.script = script;
         this.params = namedParams == null ? emptyList() : StreamSupport.stream(namedParams.spliterator(), false).collect(Collectors.toList());
     }
 
     /**
      * Executes script. All comments are cut out.
-     * Therefore all RDBMS-scpecific hints are ignored (like Oracle's <code>APPEND</code>) etc.
+     * Therefore all RDBMS-specific hints are ignored (like Oracle's <code>APPEND</code>) etc.
      *
      * @return a time, taken by this script to complete in milliseconds
      * @throws SQLRuntimeException in case of any errors including {@link SQLWarning} (if corresponding option is set) OR (if timeout is set) - in case of execution run out of time.
@@ -216,7 +216,4 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
         if (conveyor != null) conveyor.shutdownNow();
     }
 
-    private interface Action {
-        void execute();
-    }
 }

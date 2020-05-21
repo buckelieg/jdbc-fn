@@ -149,6 +149,7 @@ public final class DB implements AutoCloseable {
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Nonnull
     public final Script script(String script, Map<String, ?> namedParameters) {
+        requireNonNull(script, "SQL script must be provided");
         return new ScriptQuery(getConnection(connectionSupplier), script, namedParameters.entrySet());
     }
 
@@ -165,6 +166,7 @@ public final class DB implements AutoCloseable {
     @SafeVarargs
     @Nonnull
     public final <T extends Entry<String, ?>> Script script(String script, T... namedParameters) {
+        requireNonNull(script, "SQL script must be provided");
         return new ScriptQuery(getConnection(connectionSupplier), script, asList(namedParameters));
     }
 
@@ -246,6 +248,7 @@ public final class DB implements AutoCloseable {
      */
     @Nonnull
     public StoredProcedure procedure(String query, P<?>... parameters) {
+        requireNonNull(query, "SQL query must be provided");
         if (isAnonymous(query) && !isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid procedure call statement", query));
         } else {
@@ -295,6 +298,7 @@ public final class DB implements AutoCloseable {
      */
     @Nonnull
     public Select select(String query, Object... parameters) {
+        requireNonNull(query, "SQL query must be provided");
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid select statement", query));
         }
@@ -313,6 +317,7 @@ public final class DB implements AutoCloseable {
      */
     @Nonnull
     public Update update(String query, Object[]... batch) {
+        requireNonNull(query, "SQL query must be provided");
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid DML statement", query));
         }
@@ -329,6 +334,7 @@ public final class DB implements AutoCloseable {
      */
     @Nonnull
     public Query query(String query, Object... parameters) {
+        requireNonNull(query, "SQL query must be provided");
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid SQL statement", query));
         }
@@ -473,6 +479,7 @@ public final class DB implements AutoCloseable {
      * @param action    an action to be performed in transaction
      * @return an arbitrary result
      * @throws NullPointerException if no action is provided
+     * @throws UnsupportedOperationException if <code>createNew</code> is <code>true</code> but provided <code>connectionSupplier</code> cannot create new connection
      * @see TransactionIsolation
      * @see TryFunction
      */
@@ -492,6 +499,7 @@ public final class DB implements AutoCloseable {
      * @param action    an action to be performed in transaction
      * @return an arbitrary result
      * @throws NullPointerException if no action is provided
+     * @throws UnsupportedOperationException if new connection (if requested) could not be created
      * @see #transaction(boolean, TransactionIsolation, TryFunction)
      */
     @Nullable
@@ -500,7 +508,7 @@ public final class DB implements AutoCloseable {
     }
 
     /**
-     * Creates a transaction for the set of an arbitrary statements with default isolation level with <code>createNew</code> set to <code>false</code>
+     * Creates a transaction for the set of an arbitrary statements with default isolation level within the same connection (<code>createNew</code> set to <code>false</code>)
      *
      * @param action an action to be performed in transaction
      * @return an arbitrary result

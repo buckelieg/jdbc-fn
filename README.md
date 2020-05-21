@@ -188,7 +188,7 @@ This will print out to standard output two lines:
 <br/>Calling <code>print()</code> on <code>Script</code> will print out the whole sql script with parameters substituted.
 <br/>Custom logging handler may also be provided for both cases.
 
-### Going simple...
+### Helper: Queries
 For cases when it is all about query execution on existing connection with no tuning, logging and other stuff the <code>Queries</code> helper class can be used.
 <br/>For example:
 ```java
@@ -202,8 +202,8 @@ There are plenty of pre-defined cases implemented:
 <br/><code>call</code> - call a <code>StoredProcedure</code> either with results or without,
 <br/><code>update</code> - to execute various updates,
 <br/><code>execute</code> - to execute atomic queries and/or scripts
-#### ...even simpler
-There is an option to set up the connection with helper class to reduce a number of method arguments:
+<br/>
+<br/>There is an option to set up the connection with helper class to reduce a number of method arguments:
 ```java
 Connection conn = ... // somewhere previously created connection
 Queries.setConnection(conn);
@@ -211,18 +211,20 @@ Queries.setConnection(conn);
 List<String> names = Queries.list(rs -> rs.getString("name"), "SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry("ids", new long[]{1, 2, 3}));
 List<String> names = Queries.callForList(rs -> rs.getString(1), "{call GETALLNAMES()}");
 ```
-#### ...even simplest...
-with built-in mapper functionality.
-<br/>All <code>Select</code> query methods which takes a <code>mapper</code> function has a companion one without.
+Note that connection must be closed explicitly after using <code>Queries</code> helper.
+### Built-in mappers
+All <code>Select</code> query methods which takes a <code>mapper</code> function has a companion one without.
 <br/> Calling that <code>mapper</code>-less methods will imply mapping a tuple as <code>String</code> alias to <code>Object</code> value.
 <br/>For example:
 ```java
+// DB
+DB db = new DB(datasourceInstance);
+List<Map<String, Object>> = db.select("SELECT name FROM TEST").list();
+// Queries
 Connection conn = ... // somewhere previously created connection
 Queries.setConnection(conn);
 List<Map<String, Object>> names = Queries.list("SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry("ids", new long[]{1, 2, 3}));
 ```
-So that there are minimum efforts to obtain data from database.
-<br/>Note that connection must be closed explicitly after using <code>Queries</code> helper.
 
 ### Prerequisites
 Java8, Maven, Appropriate JDBC driver.

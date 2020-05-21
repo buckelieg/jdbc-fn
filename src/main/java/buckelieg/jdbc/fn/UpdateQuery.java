@@ -43,7 +43,6 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
     private boolean isLarge;
     private boolean isBatch;
     private boolean isPoolable;
-    private boolean skipWarnings;
     private boolean isEscaped = true;
     private int timeout;
     private TimeUnit unit = TimeUnit.SECONDS;
