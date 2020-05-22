@@ -487,7 +487,7 @@ public final class DB implements AutoCloseable {
     @Nullable
     public <T> T transaction(boolean createNew, @Nullable TransactionIsolation level, TryFunction<DB, T, SQLException> action) {
         try {
-            return doInTransaction(createNew && connection != null, getConnectionSupplier(connectionSupplier, createNew), level, conn -> requireNonNull(action, "Action must be provided").apply(createNew ? new DB(conn, connectionSupplier) : this));
+            return doInTransaction(createNew && connection != null, getConnectionSupplier(connectionSupplier, createNew), level, conn -> requireNonNull(action, "Action must be provided").apply(createNew && connection != null ? new DB(conn, connectionSupplier) : this));
         } catch (SQLException e) {
             throw newSQLRuntimeException(e);
         }
