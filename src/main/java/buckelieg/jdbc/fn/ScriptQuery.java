@@ -91,13 +91,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
                 }
                 conveyor = newSingleThreadExecutor(); // TODO implement executor that uses current thread
                 try {
-                    conveyor.submit(() -> {
-                        try {
-                            doExecute();
-                        } catch (SQLException e) {
-                            throw newSQLRuntimeException(e);
-                        }
-                    }).get(timeout, unit);
+                    conveyor.submit(this::doExecute).get(timeout, unit);
                 } catch (Exception e) {
                     throw new SQLException(e);
                 }
@@ -110,7 +104,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
         }
     }
 
-    private void doExecute() throws SQLException {
+    private void doExecute() {
         for (String query : script.split(STATEMENT_DELIMITER)) {
             try {
                 if (isAnonymous(query)) {
@@ -131,7 +125,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
                 if (skipErrors) {
                     errorHandler.accept(new SQLException(e));
                 } else {
-                    throw new SQLException(e);
+                    throw newSQLRuntimeException(e);
                 }
             }
         }
