@@ -84,11 +84,25 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     @Override
     public Long execute() {
         try {
-            if (timeout == 0) {
-                return doExecute();
-            }
-            conveyor = newSingleThreadExecutor(); // TODO implement executor that uses current thread
-            return conveyor.submit(this::doExecute).get(timeout, unit);
+            return doInTransaction(false, () -> connection, null, conn -> {
+                long start = currentTimeMillis();
+                if (timeout == 0) {
+                    doExecute();
+                }
+                conveyor = newSingleThreadExecutor(); // TODO implement executor that uses current thread
+                try {
+                    conveyor.submit(() -> {
+                        try {
+                            doExecute();
+                        } catch (SQLException e) {
+                            throw newSQLRuntimeException(e);
+                        }
+                    }).get(timeout, unit);
+                } catch (Exception e) {
+                    throw new SQLException(e);
+                }
+                return currentTimeMillis() - start;
+            });
         } catch (Exception e) {
             throw newSQLRuntimeException(e);
         } finally {
@@ -96,35 +110,31 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
         }
     }
 
-    private long doExecute() throws SQLException {
-        return doInTransaction(false, () -> connection, null, conn -> {
-            long start = currentTimeMillis();
-            for (String query : script.split(STATEMENT_DELIMITER)) {
-                try {
-                    if (isAnonymous(query)) {
-                        if (isProcedure(query)) {
-                            executeProcedure(new StoredProcedureQuery(connection, query));
-                        } else {
-                            executeQuery(new QueryImpl(connection, query));
-                        }
+    private void doExecute() throws SQLException {
+        for (String query : script.split(STATEMENT_DELIMITER)) {
+            try {
+                if (isAnonymous(query)) {
+                    if (isProcedure(query)) {
+                        executeProcedure(new StoredProcedureQuery(connection, query));
                     } else {
-                        Map.Entry<String, Object[]> preparedQuery = prepareQuery(query, params);
-                        if (isProcedure(preparedQuery.getKey())) {
-                            executeProcedure(new StoredProcedureQuery(connection, preparedQuery.getKey(), stream(preparedQuery.getValue()).map(p -> p instanceof P ? (P<?>) p : P.in(p)).toArray(P[]::new)));
-                        } else {
-                            executeQuery(new QueryImpl(connection, preparedQuery.getKey(), preparedQuery.getValue()));
-                        }
+                        executeQuery(new QueryImpl(connection, query));
                     }
-                } catch (Exception e) {
-                    if (skipErrors) {
-                        errorHandler.accept(new SQLException(e));
+                } else {
+                    Map.Entry<String, Object[]> preparedQuery = prepareQuery(query, params);
+                    if (isProcedure(preparedQuery.getKey())) {
+                        executeProcedure(new StoredProcedureQuery(connection, preparedQuery.getKey(), stream(preparedQuery.getValue()).map(p -> p instanceof P ? (P<?>) p : P.in(p)).toArray(P[]::new)));
                     } else {
-                        throw new SQLException(e);
+                        executeQuery(new QueryImpl(connection, preparedQuery.getKey(), preparedQuery.getValue()));
                     }
                 }
+            } catch (Exception e) {
+                if (skipErrors) {
+                    errorHandler.accept(new SQLException(e));
+                } else {
+                    throw new SQLException(e);
+                }
             }
-            return currentTimeMillis() - start;
-        });
+        }
     }
 
     private void executeProcedure(StoredProcedure sp) {
