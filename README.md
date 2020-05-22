@@ -170,7 +170,7 @@ This must be used with care.
 <br/>If provided connection supplier function will not return a new connection - then <code>UnsupportedOperationException</code> is thrown:
 ```java
 DB db = new DB(() -> connection);
-db.transaction(true, TransactionIsolation.SERIALIZABLE, db1 -> ....)
+db.transaction(TransactionIsolation.SERIALIZABLE, db1 -> db1.transaction(true, db2 -> ...))
 // throws UnsupportedOperationException
 ```
 Using nested transactions with various isolation levels may result in deadlocks:
