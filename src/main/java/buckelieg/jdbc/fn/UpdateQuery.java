@@ -127,7 +127,7 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
 
     @Nonnull
     public Long execute() {
-        return jdbcTry(() -> batch.length > 1 ? doInTransaction(() -> connection, null, this::doExecute) : doExecute(connection));
+        return jdbcTry(() -> batch.length > 1 ? doInTransaction(false, () -> connection, null, this::doExecute) : doExecute(connection));
     }
 
     private long doExecute(Connection conn) throws SQLException {
@@ -150,7 +150,7 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
     }
 
     private long executeSimple() {
-        return of(batch).reduce(
+        return of(batch).onClose(this::close).reduce(
                 0L,
                 (rowsAffected, params) -> rowsAffected += jdbcTry(() -> isLarge ? withStatement(s -> setStatementParameters(s, params).executeLargeUpdate()) : (long) withStatement(s -> setStatementParameters(s, params).executeUpdate())),
                 Long::sum
@@ -158,7 +158,7 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
     }
 
     private long executeBatch() {
-        return of(batch)
+        return of(batch).onClose(this::close)
                 .map(params -> withStatement(statement -> {
                     setStatementParameters(statement, params).addBatch();
                     return statement;

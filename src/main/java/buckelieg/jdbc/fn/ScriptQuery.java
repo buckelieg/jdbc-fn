@@ -97,7 +97,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     }
 
     private long doExecute() throws SQLException {
-        return doInTransaction(() -> connection, null, conn -> {
+        return doInTransaction(false, () -> connection, null, conn -> {
             long start = currentTimeMillis();
             for (String query : script.split(STATEMENT_DELIMITER)) {
                 try {

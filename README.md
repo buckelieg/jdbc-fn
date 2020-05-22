@@ -136,15 +136,14 @@ Script can contain single- and multiline comments.
 Note that scripts support named parameters and JDBC-like procedure call statements.
 
 ### Transactions
-There are a couple of methods provide transaction support.
+There are a couple of methods provides transaction support.
 <br/>Tell whether to create new transaction or not, provide isolation level and transaction logic function.
-
 ```java
 // suppose we have to insert a bunch of new users by name and get the latest one filled with its attributes....
-User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, db1 ->
+User latestUser = db.transaction(TransactionIsolation.SERIALIZABLE, db1 ->
   // here db.equals(db1) will return true
-  // but if we claim to createNew transaction it will not, because a new connection is obtained and new DB instance is created
-  // so everything inside a transaction MUST be done through db1 reference since it will operate on newly created connection.      
+  // but if we claim to create new transaction it will not, because a new connection is obtained and new DB instance is created
+  // so everything inside a transaction (in this case) MUST be done through db1 reference since it will operate on newly created connection   
   db1.update("INSERT INTO users(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"}, {"name3"} })
     .skipWarnings(false)
     .timeout(1, TimeUnit.MINUTES)
@@ -164,7 +163,26 @@ User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, db1 -
     .orElse(null)
 );
 ```
-When calling <code>transaction()</code> method <code>createNew</code> flag (if set to <code>true</code>) implies obtaining new connection via <code>DataSource</code> or connection supplier function provided at the <code>DB</code> class [initialization](#setup-database) stage.
+Note (as the rule of thumb): always use lambda parameter to do the things inside the transaction
+###### Nested transactions
+This must be used with care.
+<br/>When calling <code>transaction()</code> method <code>createNew</code> flag (if set to <code>true</code>) implies obtaining new connection via <code>DataSource</code> or connection supplier function provided at the <code>DB</code> class [initialization](#setup-database) stage.
+<br/>If provided connection supplier function will not return a new connection - then <code>UnsupportedOperationException</code> is thrown:
+```java
+DB db = new DB(() -> connection);
+db.transaction(true, TransactionIsolation.SERIALIZABLE, db1 -> ....)
+// throws UnsupportedOperationException
+```
+Using nested transactions with various isolation levels may result in deadlocks:
+```java
+DB db = new DB(datasourceInstance);
+db.transaction(TransactionIsolation.READ_UNCOMMITED, db1 -> {
+    // do inserts, updates etc...
+    long someGeneratedId = ....
+    return db1.transaction(true, TransactionIsolation.SERIALIZABLE, db2 -> db2.select("SELECT * FROM TEST WHERE id=?", someGeneratedId).list(rs -> rs.getString("name")));
+});
+// nested transaction will be done over newly obtained connection but will not able to complete or see the generated values before enclosing transaction is committed and will eventually fail
+```
 ### Logging & Debugging
 Convenient logging methods provided.
 ```java

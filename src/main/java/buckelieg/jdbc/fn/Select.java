@@ -70,16 +70,16 @@ public interface Select extends Query {
     }
 
     /**
-     * Stream abstraction over ResultSet
+     * Executes this SELECT statement returning a <code>Stream</code> of mapped values as <code>Map</code>s
      * <br/>Note:
      * Whenever we left stream without calling some 'reduction' (terminal) operation we left resource freeing to JDBC
-     * <br/><code>stream().iterator().next().get(...)</code>
+     * <br/><code>stream().iterator().next()</code>
      * <br/>Thus there could be none or some rows more, but result set (and a statement) would not be closed forcibly
      * <br/>In such cases we rely on JDBC resources auto closing mechanism
-     * <br/>And it is strongly recommended to use <code>single</code> method for the cases above
+     * <br/>And it is strongly recommended to use {@link #single()} method for the cases above
      *
-     * @return a {@link Stream} over {@link ResultSet}
-     * @see #single(TryFunction)
+     * @return a {@link Stream} of {@link Map}s
+     * @see #execute(TryFunction)
      */
     @Nonnull
     default Stream<Map<String, Object>> execute() {
@@ -87,7 +87,13 @@ public interface Select extends Query {
     }
 
     /**
-     * Shorthand for stream mapping
+     * Executes this SELECT statement returning a <code>Stream</code> of mapped values over <code>ResultSet</code> object
+     * <br/>Note:
+     * Whenever we left stream without calling some 'reduction' (terminal) operation we left resource freeing to JDBC
+     * <br/><code>stream().iterator().next()</code>
+     * <br/>Thus there could be none or some rows more, but result set (and a statement) would not be closed forcibly
+     * <br/>In such cases we rely on JDBC resources auto closing mechanism
+     * <br/>And it is strongly recommended to use {@link #single(TryFunction)} method for the cases above
      *
      * @param mapper result set mapper which is not required to handle {@link SQLException}
      * @return a {@link Stream} over mapped {@link ResultSet}

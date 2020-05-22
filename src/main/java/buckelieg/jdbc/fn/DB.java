@@ -449,6 +449,7 @@ public final class DB implements AutoCloseable {
      *      // here db.equals(db1) will return true
      *      // but if we claim to createNew transaction it will not, because a new connection is obtained and new DB instance is created
      *      // so everything inside a transaction MUST be done through db1 reference since it will operate on newly created connection.
+     *      // as the rule of thumb - always use lambda parameter to do the things inside transaction
      *      db1.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
      *        .skipWarnings(false)
      *        .timeout(1, TimeUnit.MINUTES)
@@ -486,7 +487,7 @@ public final class DB implements AutoCloseable {
     @Nullable
     public <T> T transaction(boolean createNew, @Nullable TransactionIsolation level, TryFunction<DB, T, SQLException> action) {
         try {
-            return doInTransaction(getConnectionSupplier(connectionSupplier, createNew), level, conn -> requireNonNull(action, "Action must be provided").apply(createNew ? new DB(conn, connectionSupplier) : this));
+            return doInTransaction(createNew, getConnectionSupplier(connectionSupplier, createNew), level, conn -> requireNonNull(action, "Action must be provided").apply(createNew ? new DB(conn, connectionSupplier) : this));
         } catch (SQLException e) {
             throw newSQLRuntimeException(e);
         }
@@ -518,6 +519,19 @@ public final class DB implements AutoCloseable {
     @Nullable
     public <T> T transaction(TryFunction<DB, T, SQLException> action) {
         return transaction(false, action);
+    }
+
+    /**
+     * Creates a transaction within the current connection with provided {@link TransactionIsolation} level.
+     *
+     * @param isolationLevel transaction isolation level to set
+     * @param action an action to be dne in transaction
+     * @return an arbitrary result
+     * @see #transaction(boolean, TransactionIsolation, TryFunction)
+     */
+    @Nullable
+    public <T> T transaction(TransactionIsolation isolationLevel, TryFunction<DB, T, SQLException> action) {
+        return transaction(false, isolationLevel, action);
     }
 
     private Select select(String query, Iterable<? extends Entry<String, ?>> namedParams) {

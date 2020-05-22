@@ -210,7 +210,7 @@ final class Utils {
         return new SQLRuntimeException(message.toString().trim(), false);
     }
 
-    static <T> T doInTransaction(TrySupplier<Connection, SQLException> connectionSupplier, TransactionIsolation isolationLevel, TryFunction<Connection, T, SQLException> action) throws SQLException {
+    static <T> T doInTransaction(boolean forceClose, TrySupplier<Connection, SQLException> connectionSupplier, TransactionIsolation isolationLevel, TryFunction<Connection, T, SQLException> action) throws SQLException {
         Connection conn = connectionSupplier.get();
         boolean autoCommit = true;
         Savepoint savepoint = null;
@@ -233,6 +233,9 @@ final class Utils {
         } finally {
             conn.setAutoCommit(autoCommit);
             conn.setTransactionIsolation(isolation);
+            if(forceClose) {
+                conn.close();
+            }
         }
     }
 

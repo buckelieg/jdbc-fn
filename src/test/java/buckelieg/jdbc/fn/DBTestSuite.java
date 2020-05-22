@@ -450,6 +450,13 @@ public class DBTestSuite {
         }
     }
 
+    @Test(expected = UnsupportedOperationException.class)
+    public void testNoNewConnectionSupplierWithTransaction() throws Exception {
+        Connection conn = ds.getConnection();
+        DB db = new DB(() -> conn);
+        db.transaction(db1 -> db1.transaction(true, db2 -> null));
+    }
+
     @Test
     public void testNestedTransactions() throws Exception {
         List<String> list = db.transaction(db1 -> {
