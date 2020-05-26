@@ -149,8 +149,7 @@ public final class DB implements AutoCloseable {
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Nonnull
     public final Script script(String script, Map<String, ?> namedParameters) {
-        requireNonNull(script, "SQL script must be provided");
-        return new ScriptQuery(getConnection(connectionSupplier), script, namedParameters.entrySet());
+        return new ScriptQuery(getConnection(connectionSupplier), cutComments(requireNonNull(script, "SQL script must be provided")), namedParameters.entrySet());
     }
 
     /**
@@ -166,8 +165,7 @@ public final class DB implements AutoCloseable {
     @SafeVarargs
     @Nonnull
     public final <T extends Entry<String, ?>> Script script(String script, T... namedParameters) {
-        requireNonNull(script, "SQL script must be provided");
-        return new ScriptQuery(getConnection(connectionSupplier), script, asList(namedParameters));
+        return new ScriptQuery(getConnection(connectionSupplier), cutComments(requireNonNull(script, "SQL script must be provided")), asList(namedParameters));
     }
 
     /**
@@ -248,14 +246,14 @@ public final class DB implements AutoCloseable {
      */
     @Nonnull
     public StoredProcedure procedure(String query, P<?>... parameters) {
-        requireNonNull(query, "SQL query must be provided");
+        query = checkSingle(requireNonNull(query, "SQL query must be provided"));
         if (isAnonymous(query) && !isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid procedure call statement", query));
         } else {
             int namedParams = (int) of(parameters).filter(p -> !p.getName().isEmpty()).count();
             if (namedParams == parameters.length && parameters.length > 0) {
                 Entry<String, Object[]> preparedQuery = prepareQuery(
-                        cutComments(query),
+                        query,
                         of(parameters)
                                 .map(p -> new SimpleImmutableEntry<>(p.getName(), new P<?>[]{p}))
                                 .collect(toList())
@@ -302,7 +300,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid select statement", query));
         }
-        return new SelectQuery(getConnection(connectionSupplier), checkAnonymous(query), parameters);
+        return new SelectQuery(getConnection(connectionSupplier), checkAnonymous(checkSingle(query)), parameters);
     }
 
 
@@ -321,7 +319,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid DML statement", query));
         }
-        return new UpdateQuery(getConnection(connectionSupplier), checkAnonymous(query), batch);
+        return new UpdateQuery(getConnection(connectionSupplier), checkAnonymous(checkSingle(query)), batch);
     }
 
     /**
@@ -338,10 +336,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid SQL statement", query));
         }
-        if (cutComments(query).contains(STATEMENT_DELIMITER)) {
-            throw new IllegalArgumentException(format("Query '%s' is not a single one", query));
-        }
-        return new QueryImpl(getConnection(connectionSupplier), checkAnonymous(query), parameters);
+        return new QueryImpl(getConnection(connectionSupplier), checkAnonymous(checkSingle(query)), parameters);
     }
 
     /**
@@ -547,7 +542,7 @@ public final class DB implements AutoCloseable {
     }
 
     private <T extends Query> T prepare(String query, Iterable<? extends Entry<String, ?>> namedParams, BiFunction<String, Object[], T> toQuery) {
-        Entry<String, Object[]> preparedQuery = prepareQuery(cutComments(query), namedParams);
+        Entry<String, Object[]> preparedQuery = prepareQuery(query, namedParams);
         return toQuery.apply(preparedQuery.getKey(), preparedQuery.getValue());
     }
 

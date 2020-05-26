@@ -29,7 +29,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
-import static buckelieg.jdbc.fn.Utils.cutComments;
+import static buckelieg.jdbc.fn.Utils.*;
 import static java.lang.Thread.currentThread;
 import static java.util.AbstractMap.SimpleImmutableEntry;
 import static java.util.Collections.singletonList;
@@ -533,6 +533,8 @@ public class DBTestSuite {
                 )
         );
         assertEquals("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(?,?,?)", entry.getKey());
+        entry = prepareQuery("SELECT ':ids' FROM TEST WHERE id IN (:ids)", singletonList(new SimpleImmutableEntry<>("ids1", new int[]{1, 2, 3})));
+        assertEquals("SELECT ':ids' FROM TEST WHERE id IN (?,?,?)", entry.getKey());
         assertTrue(Utils.isAnonymous("SELECT 1 AS \":one\""));
         entry = Utils.prepareQuery("SELECT id AS \":ids :idss\" FROM TEST WHERE id IN(:ids1)", singletonList(new SimpleImmutableEntry<>("ids2", new int[]{1, 2, 3})));
     }
@@ -557,6 +559,12 @@ public class DBTestSuite {
         assertEquals(10, db.select("SELECT * FROM TEST").list().size());
         db.close();
         assertEquals(10, db.select("SELECT * FROM TEST").list().size());
+    }
+
+    @Test
+    public void testSingleQuery() throws Exception {
+        String query = "SELECT * FROM TEST';' SELECT * FROM TEST";
+        checkSingle(query);
     }
 
 }

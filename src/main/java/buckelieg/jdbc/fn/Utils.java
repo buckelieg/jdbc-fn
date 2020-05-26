@@ -43,8 +43,9 @@ final class Utils {
     static final String EXCEPTION_MESSAGE = "Unsupported operation";
     static final String STATEMENT_DELIMITER = ";";
     static final Pattern PARAMETER = Pattern.compile("\\?");
-    private static final String NAMED_PARAMETER_TRAIL = "(?=(([^\"]*\"){2})*[^\"]*$)";
+    private static final String NAMED_PARAMETER_TRAIL = "(?=(([^\"']*\"'){2})*[^\"']*$)";
     static final Pattern NAMED_PARAMETER = Pattern.compile(format("%s%s", "(:\\w*\\b)", NAMED_PARAMETER_TRAIL));
+    private static final Pattern STATEMENT_DELIMITER_PATTERN = Pattern.compile(format("%s%s+", STATEMENT_DELIMITER, NAMED_PARAMETER_TRAIL));
 
     // Java regexp does not support conditional regexps. We will enumerate all possible variants.
     static final Pattern STORED_PROCEDURE = Pattern.compile(format("%s|%s|%s|%s|%s|%s",
@@ -264,6 +265,14 @@ final class Utils {
             replaced = replaced.replace(replaced.substring(startIndices.get(i), endIndices.get(i)), format("%" + (endIndices.get(i) - startIndices.get(i)) + "s", " "));
         }
         return replaced.replaceAll("(\\s){2,}", " ").trim();
+    }
+
+    static String checkSingle(String query) {
+        query = cutComments(query);
+        if (STATEMENT_DELIMITER_PATTERN.matcher(query).find()) {
+            throw new IllegalArgumentException(format("Query '%s' is not a single one", query));
+        }
+        return query;
     }
 
     static <S extends PreparedStatement> S setStatementParameters(S statement, Object... params) throws SQLException {
