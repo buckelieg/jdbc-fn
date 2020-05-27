@@ -476,6 +476,7 @@ public final class DB implements AutoCloseable {
      * @return an arbitrary result
      * @throws NullPointerException if no action is provided
      * @throws UnsupportedOperationException if <code>createNew</code> is <code>true</code> but provided <code>connectionSupplier</code> cannot create new connection
+     * @throws IllegalArgumentException desired transaction isolation level is not supported
      * @see TransactionIsolation
      * @see TryFunction
      */
@@ -522,6 +523,8 @@ public final class DB implements AutoCloseable {
      * @param isolationLevel transaction isolation level to set
      * @param action an action to be dne in transaction
      * @return an arbitrary result
+     * @throws NullPointerException if no action is provided
+     * @throws IllegalArgumentException desired transaction isolation level is not supported
      * @see #transaction(boolean, TransactionIsolation, TryFunction)
      */
     @Nullable

@@ -221,7 +221,10 @@ final class Utils {
             autoCommit = conn.getAutoCommit();
             conn.setAutoCommit(false);
             savepoint = conn.setSavepoint();
-            if (isolationLevel != null && isolation != isolationLevel.level && conn.getMetaData().supportsTransactionIsolationLevel(isolationLevel.level)) {
+            if (isolationLevel != null && isolation != isolationLevel.level) {
+                if (!conn.getMetaData().supportsTransactionIsolationLevel(isolationLevel.level)) {
+                    throw new IllegalArgumentException(format("Unsupported transaction isolation level: '%s'", isolationLevel.name()));
+                }
                 conn.setTransactionIsolation(isolationLevel.level);
             }
             result = action.apply(conn);
@@ -234,7 +237,7 @@ final class Utils {
         } finally {
             conn.setAutoCommit(autoCommit);
             conn.setTransactionIsolation(isolation);
-            if(forceClose) {
+            if (forceClose) {
                 conn.close();
             }
         }

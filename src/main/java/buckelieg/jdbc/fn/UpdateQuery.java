@@ -150,27 +150,14 @@ final class UpdateQuery extends AbstractQuery<PreparedStatement> implements Upda
     }
 
     private long executeSimple() {
-        return of(batch).onClose(this::close).reduce(
-                0L,
-                (rowsAffected, params) -> rowsAffected += jdbcTry(() -> isLarge ? withStatement(s -> setStatementParameters(s, params).executeLargeUpdate()) : (long) withStatement(s -> setStatementParameters(s, params).executeUpdate())),
-                Long::sum
-        );
+        return of(batch).onClose(this::close).reduce(0L, (rowsAffected, params) -> rowsAffected += jdbcTry(() -> isLarge ? withStatement(s -> setStatementParameters(s, params).executeLargeUpdate()) : (long) withStatement(s -> setStatementParameters(s, params).executeUpdate())), Long::sum);
     }
 
     private long executeBatch() {
-        return of(batch).onClose(this::close)
-                .map(params -> withStatement(statement -> {
-                    setStatementParameters(statement, params).addBatch();
-                    return statement;
-                }))
-                .reduce(
-                        0L,
-                        (rowsAffected, stmt) ->
-                                rowsAffected += stream(
-                                        jdbcTry(() -> isLarge ? stmt.executeLargeBatch() : stream(stmt.executeBatch()).asLongStream().toArray())
-                                ).sum(),
-                        Long::sum
-                );
+        return of(batch).onClose(this::close).map(params -> withStatement(statement -> {
+            setStatementParameters(statement, params).addBatch();
+            return statement;
+        })).reduce(0L, (rowsAffected, stmt) -> rowsAffected += stream(jdbcTry(() -> isLarge ? stmt.executeLargeBatch() : stream(stmt.executeBatch()).asLongStream().toArray())).sum(), Long::sum);
     }
 
     @Override
