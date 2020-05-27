@@ -207,8 +207,7 @@ This will print out to standard output two lines:
 <br/>Custom logging handler may also be provided for both cases.
 
 ### Helper: Queries
-For cases when it is all about query execution on existing connection with no tuning, logging and other stuff the <code>Queries</code> helper class can be used.
-<br/>For example:
+For cases when it is all about query execution on existing connection with no tuning, logging and other stuff the <code>Queries</code> helper class can be used:
 ```java
 Connection conn = ... // somewhere previously created connection
 List<String> names = Queries.list(conn, rs -> rs.getString("name"), "SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry("ids", new long[]{1, 2, 3}));
@@ -232,8 +231,7 @@ List<String> names = Queries.callForList(rs -> rs.getString(1), "{call GETALLNAM
 Note that connection must be closed explicitly after using <code>Queries</code> helper.
 ### Built-in mappers
 All <code>Select</code> query methods which takes a <code>mapper</code> function has a companion one without.
-<br/> Calling that <code>mapper</code>-less methods will imply mapping a tuple as <code>String</code> alias to <code>Object</code> value.
-<br/>For example:
+<br/> Calling that <code>mapper</code>-less methods will imply mapping a tuple as <code>String</code> alias to <code>Object</code> value:
 ```java
 // DB
 DB db = new DB(datasourceInstance);
