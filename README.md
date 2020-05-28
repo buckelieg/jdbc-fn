@@ -49,27 +49,20 @@ Note that providing connection supplier function with plain connection
 ### Select
 Use question marks:
 ```java
-Collection<T> results = db.select("SELECT * FROM TEST WHERE ID IN (?, ?)", 1, 2).execute(rs ->{/*map ResultSet here*/}).collect(Collectors.toList());
+Collection<String> names = db.select("SELECT name FROM TEST WHERE ID IN (?, ?)", 1, 2).execute(rs -> rs.getString("name")).collect(Collectors.toList());
 // an alias for execute method is stream - for better readability
-Collection<T> results = db.select("SELECT * FROM TEST WHERE ID IN (?, ?)", 1, 2).stream(rs ->{/*map ResultSet here*/}).collect(Collectors.toList());
+Collection<String> names = db.select("SELECT name FROM TEST WHERE ID IN (?, ?)", 1, 2).stream(rs -> rs.getString("name")).collect(Collectors.toList());
 // or use shorthands for stream reduction
-Collection<T> results = db.select("SELECT * FROM TEST WHERE ID IN (?, ?)", 1, 2).list(rs ->{/*map ResultSet here*/});
+Collection<String> names = db.select("SELECT name FROM TEST WHERE ID IN (?, ?)", 1, 2).list(rs -> rs.getString("name"));
 ```
 or use named parameters:
 ```java
-Collection<T> results = db.select("SELECT * FROM TEST WHERE 1=1 AND ID IN (:ID) OR NAME=:name", new HashMap<String, Object> {
-          {
-            put("ID", new Object[]{1, 2});
-            put("name", "name_5"); // for example only. Do not use this IRL.
-          }
-}).execute(rs -> rs).reduce(
+// in java9+
+import static java.util.Map.of;
+Collection<String> names = db.select("SELECT * FROM TEST WHERE 1=1 AND ID IN (:ID) OR NAME=:name", of("ID", new Object[]{1, 2}, "name", name_5").execute(rs -> rs.getString("name")).reduce(
                 new LinkedList<T>(),
-                (list, rs) -> {
-                    try {
-                        list.add(...);
-                    } catch (SQLException e) {
-                        e.printStackTrace();
-                    }
+                (list, name) -> {
+                    list.add(name);
                     return list;
                 },
                 (l1, l2) -> {
@@ -88,6 +81,9 @@ long res = db.update("INSERT INTO TEST(name) VALUES(?)", "New_Name").execute();
 Or with named parameters:
 ```java
 long res = db.update("INSERT INTO TEST(name) VALUES(:name)", new SimpleImmutableEntry<>("name","New_Name")).execute();
+// in java9+
+import static java.util.Map.entry;
+long res = db.update("INSERT INTO TEST(name) VALUES(:name)", entry("name","New_Name")).execute();
 ```
 ### Update
 ```java
@@ -99,6 +95,9 @@ long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name",
   new SimpleImmutableEntry<>("name", "new_name_2"), 
   new SimpleImmutableEntry<>("new_name", "name_2")
 ).execute();
+// in java9+
+import static java.util.Map.entry;
+long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name", entry("name", "new_name_2"), entry(new_name", "name_2")).execute();
 ```
 ###### Batch mode
 For batch operation use:
@@ -129,11 +128,12 @@ db.script("CREATE TABLE TEST (id INTEGER NOT NULL, name VARCHAR(255));INSERT INT
 ```java
   db.script(new File("path/to/script.sql")).timeout(60).execute();
 ```
-Script can contain single- and multiline comments. 
+Script:
+<br/>Can contain single- and multiline comments. 
 <br/>Each statement must be separated by a semicolon (";").
-<br/>Script execution results ignored and not handled after all.
-
-Note that scripts support named parameters and JDBC-like procedure call statements.
+<br/>Execution results ignored and not handled after all.
+<br/>Support named parameters
+<br/>Support escaped syntax, so it is possible to include JDBC-like procedure call statements.
 
 ### Transactions
 There are a couple of methods provides transaction support.
@@ -163,7 +163,7 @@ User latestUser = db.transaction(TransactionIsolation.SERIALIZABLE, db1 ->
     .orElse(null)
 );
 ```
-Note (as the rule of thumb): always use lambda parameter to do the things inside the transaction
+As the rule of thumb: always use lambda parameter to do the things inside the transaction
 ###### Nested transactions
 This must be used with care.
 <br/>When calling <code>transaction()</code> method <code>createNew</code> flag (if set to <code>true</code>) implies obtaining new connection via <code>DataSource</code> or connection supplier function provided at the <code>DB</code> class [initialization](#setup-database) stage.
@@ -183,6 +183,7 @@ db.transaction(TransactionIsolation.READ_UNCOMMITED, db1 -> {
 });
 // nested transaction will be done over newly obtained connection but will not able to complete or see the generated values before enclosing transaction is committed and will eventually fail
 ```
+Whenever desired transaction isolation level is not supported by RDBMS the <code>IllegalArgumentException</code> is thrown.
 ### Logging & Debugging
 Convenient logging methods provided.
 ```java
@@ -190,7 +191,7 @@ Logger LOG = ... // configure logger
 db.select("SELECT * FROM TEST WHERE id=?", 7).print(LOG::debug).list(rs -> {/*map rs here*/});
 ```
 The above will print a current query to provided logger with debug method.
-<br/>Note that all provided parameters will be substituted with corresponding values so this case will output:
+<br/>All provided parameters will be substituted with corresponding values so this case will output:
 <br/><code>SELECT * FROM TEST WHERE id=7</code>
 <br/>Calling <code>print()</code> without arguments will do the same with standard output.
 
