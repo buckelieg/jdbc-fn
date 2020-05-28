@@ -59,7 +59,7 @@ or use named parameters:
 ```java
 // in java9+
 import static java.util.Map.of;
-Collection<String> names = db.select("SELECT * FROM TEST WHERE 1=1 AND ID IN (:ID) OR NAME=:name", of("ID", new Object[]{1, 2}, "name", "name_5").execute(rs -> rs.getString("name"))
+Collection<String> names = db.select("SELECT name FROM TEST WHERE 1=1 AND ID IN (:ID) OR NAME=:name", of(":ID", new Object[]{1, 2}, ":name", "name_5").execute(rs -> rs.getString("name"))
         .reduce(
                 new LinkedList<T>(),
                 (list, name) -> {
@@ -73,6 +73,7 @@ Collection<String> names = db.select("SELECT * FROM TEST WHERE 1=1 AND ID IN (:I
         );
 ```
 Parameter names are CASE SENSITIVE! 'Name' and 'name' are considered different parameter names.
+<br/> Parameters may be provided with or without leading colon.
 
 ### Insert 
 with question marks:
