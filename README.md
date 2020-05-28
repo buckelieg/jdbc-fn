@@ -99,7 +99,7 @@ long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name",
 ).execute();
 // in java9+
 import static java.util.Map.entry;
-long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name", entry("name", "new_name_2"), entry(new_name", "name_2")).execute();
+long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name", entry(":name", "new_name_2"), entry(":new_name", "name_2")).execute();
 ```
 ###### Batch mode
 For batch operation use:
