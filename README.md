@@ -61,7 +61,7 @@ or use named parameters:
 import static java.util.Map.of;
 Collection<String> names = db.select("SELECT name FROM TEST WHERE 1=1 AND ID IN (:ID) OR NAME=:name", of(":ID", new Object[]{1, 2}, ":name", "name_5")).execute(rs -> rs.getString("name"))
         .reduce(
-                new LinkedList<T>(),
+                new LinkedList<>(),
                 (list, name) -> {
                     list.add(name);
                     return list;
@@ -159,7 +159,7 @@ User latestUser = db.transaction(TransactionIsolation.SERIALIZABLE, db1 ->
                      u.setId(rs.getLong("id"));
                      u.setName(rs.getString("name"));
                      //... fill other user's attributes...
-                     return user;
+                     return u;
                  })
     )
     .orElse(null)
