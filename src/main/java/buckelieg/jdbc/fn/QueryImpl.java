@@ -23,13 +23,10 @@ import java.sql.Statement;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-import static buckelieg.jdbc.fn.Utils.checkAnonymous;
 import static buckelieg.jdbc.fn.Utils.setStatementParameters;
 
 @SuppressWarnings("unchecked")
 final class QueryImpl extends AbstractQuery<Statement> {
-
-    private boolean isPrepared;
 
     QueryImpl(Connection connection, String query, Object... params) {
         super(connection, query, params);
@@ -37,7 +34,7 @@ final class QueryImpl extends AbstractQuery<Statement> {
 
     @Override
     Statement prepareStatement(Connection connection, String query, Object... params) throws SQLException {
-        return (this.isPrepared = params != null && params.length != 0) ? setStatementParameters(connection.prepareStatement(query), params) : connection.createStatement();
+        return (isPrepared = params != null && params.length != 0) ? setStatementParameters(connection.prepareStatement(query), params) : connection.createStatement();
     }
 
     @Override

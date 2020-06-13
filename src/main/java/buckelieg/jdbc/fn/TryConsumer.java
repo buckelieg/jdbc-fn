@@ -24,7 +24,6 @@ import static java.util.Objects.requireNonNull;
  * @param <T> the type of the input to the operation
  * @param <E> the type of the possible exception
  */
-@SuppressWarnings("unchecked")
 @FunctionalInterface
 public interface TryConsumer<T, E extends Throwable> {
 
@@ -62,14 +61,10 @@ public interface TryConsumer<T, E extends Throwable> {
      */
     default TryConsumer<T, E> andThen(TryConsumer<? super T, E> after) throws E {
         requireNonNull(after);
-        try {
-            return (T t) -> {
-                accept(t);
-                after.accept(t);
-            };
-        } catch (Throwable t) {
-            throw (E) t;
-        }
+        return (T t) -> {
+            accept(t);
+            after.accept(t);
+        };
     }
 
     /**
@@ -87,14 +82,10 @@ public interface TryConsumer<T, E extends Throwable> {
      */
     default TryConsumer<T, E> compose(TryConsumer<? super T, E> before) throws E {
         requireNonNull(before);
-        try {
-            return (T t) -> {
-                before.accept(t);
-                accept(t);
-            };
-        } catch (Throwable t) {
-            throw (E) t;
-        }
+        return (T t) -> {
+            before.accept(t);
+            accept(t);
+        };
     }
 
 }

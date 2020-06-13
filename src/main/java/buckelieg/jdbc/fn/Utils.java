@@ -251,11 +251,12 @@ final class Utils {
         Matcher matcher = MULTILINE_COMMENT_DELIMITER.matcher(replaced);
         while (matcher.find()) {
             String delimiter = matcher.group();
-            if (delimiter.isEmpty()) continue;
-            if (MULTILINE_COMMENT_DELIMITER_START.equals(delimiter)) {
-                startIndices.add(matcher.start());
-            } else if (MULTILINE_COMMENT_DELIMITER_END.equals(delimiter)) {
-                endIndices.add(matcher.end());
+            if (!delimiter.isEmpty()) {
+                if (MULTILINE_COMMENT_DELIMITER_START.equals(delimiter)) {
+                    startIndices.add(matcher.start());
+                } else if (MULTILINE_COMMENT_DELIMITER_END.equals(delimiter)) {
+                    endIndices.add(matcher.end());
+                }
             }
         }
         if (startIndices.size() != endIndices.size()) {

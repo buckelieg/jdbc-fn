@@ -27,9 +27,9 @@ import java.util.Map;
 import static buckelieg.jdbc.fn.Utils.EXCEPTION_MESSAGE;
 import static java.util.Objects.requireNonNull;
 
-final class ImmutableResultSet implements ResultSet {
+class ImmutableResultSet implements ResultSet {
 
-    private final ResultSet delegate;
+    protected final ResultSet delegate;
 
     ImmutableResultSet(@Nonnull ResultSet delegate) {
         this.delegate = requireNonNull(delegate, "ResultSet must be provided");

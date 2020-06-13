@@ -190,7 +190,7 @@ Whenever desired transaction isolation level is not supported by RDBMS the <code
 Convenient logging methods provided.
 ```java
 Logger LOG = ... // configure logger
-db.select("SELECT * FROM TEST WHERE id=?", 7).print(LOG::debug).list(rs -> {/*map rs here*/});
+db.select("SELECT * FROM TEST WHERE id=?", 7).print(LOG::debug).single(rs -> {/*map rs here*/});
 ```
 The above will print a current query to provided logger with debug method.
 <br/>All provided parameters will be substituted with corresponding values so this case will output:
@@ -198,7 +198,7 @@ The above will print a current query to provided logger with debug method.
 <br/>Calling <code>print()</code> without arguments will do the same with standard output.
 
 ###### Scripts logging
-For <code>Script</code> query <code>verbose()</code> method can be used to track current script query execution.
+For <code>Script</code> query <code>verbose()</code> method can be used to track current script step execution.
 ```java
 db.script("SELECT * FROM TEST WHERE id=:id;DROP TABLE TEST", new SimpleImmutableEntry<>("id", 5)).verbose().execute();
 ```

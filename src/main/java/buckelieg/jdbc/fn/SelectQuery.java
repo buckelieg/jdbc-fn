@@ -18,10 +18,7 @@ package buckelieg.jdbc.fn;
 import javax.annotation.Nonnull;
 import javax.annotation.ParametersAreNonnullByDefault;
 import javax.annotation.concurrent.NotThreadSafe;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Spliterator;
@@ -34,10 +31,9 @@ import static buckelieg.jdbc.fn.Utils.setStatementParameters;
 import static java.lang.Math.max;
 import static java.util.Objects.requireNonNull;
 
-@SuppressWarnings("unchecked")
 @NotThreadSafe
 @ParametersAreNonnullByDefault
-class SelectQuery extends AbstractQuery<PreparedStatement> implements Iterable<ResultSet>, Iterator<ResultSet>, Spliterator<ResultSet>, Select {
+class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet>, Iterator<ResultSet>, Spliterator<ResultSet>, Select {
 
     ResultSet rs;
     ResultSet wrapper;
@@ -95,7 +91,7 @@ class SelectQuery extends AbstractQuery<PreparedStatement> implements Iterable<R
     }
 
     protected void doExecute() {
-        withStatement(s -> rs = s.executeQuery());
+        withStatement(s -> rs = isPrepared ? ((PreparedStatement) s).executeQuery() : s.execute(query) ? s.getResultSet() : null);
     }
 
     @Nonnull
@@ -191,7 +187,7 @@ class SelectQuery extends AbstractQuery<PreparedStatement> implements Iterable<R
     }
 
     @Override
-    PreparedStatement prepareStatement(Connection connection, String query, Object... params) throws SQLException {
-        return setStatementParameters(connection.prepareStatement(query, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY), params);
+    Statement prepareStatement(Connection connection, String query, Object... params) throws SQLException {
+        return (isPrepared = params != null && params.length != 0) ? setStatementParameters(connection.prepareStatement(query, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY), params) : connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
     }
 }

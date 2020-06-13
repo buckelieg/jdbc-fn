@@ -15,6 +15,8 @@
  */
 package buckelieg.jdbc.fn;
 
+import java.util.Objects;
+
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -50,5 +52,25 @@ public interface TryBiFunction<I1, I2, O, E extends Throwable> {
      * @throws E an exception
      */
     O apply(I1 input1, I2 input2) throws E;
+
+
+    /**
+     * Returns a composed function that first applies this function to
+     * its input, and then applies the {@code after} function to the result.
+     * If evaluation of either function throws an exception, it is relayed to
+     * the caller of the composed function.
+     *
+     * @param <R>   the type of output of the {@code after} function, and of the
+     *              composed function
+     * @param after the function to apply after this function is applied
+     * @return a composed function that first applies this function and then
+     * applies the {@code after} function
+     * @throws E                    an exception
+     * @throws NullPointerException if after is null
+     */
+    default <R> TryBiFunction<I1, I2, R, E> andThen(TryFunction<? super O, ? extends R, E> after) throws E {
+        Objects.requireNonNull(after);
+        return (I1 input1, I2 input2) -> after.apply(apply(input1, input2));
+    }
 
 }

@@ -60,14 +60,10 @@ public interface TryAction<E extends Throwable> {
      */
     default TryAction<E> andThen(TryAction<E> after) throws E {
         requireNonNull(after);
-        try {
-            return () -> {
-                doTry();
-                after.doTry();
-            };
-        } catch (Throwable t) {
-            throw (E) t;
-        }
+        return () -> {
+            doTry();
+            after.doTry();
+        };
     }
 
     /**
@@ -85,14 +81,10 @@ public interface TryAction<E extends Throwable> {
      */
     default TryAction<E> compose(TryAction<E> before) throws E {
         requireNonNull(before);
-        try {
-            return () -> {
-                before.doTry();
-                doTry();
-            };
-        } catch (Throwable t) {
-            throw (E) t;
-        }
+        return () -> {
+            before.doTry();
+            doTry();
+        };
     }
 
 }

@@ -55,10 +55,12 @@ public class DBTestSuite {
         DBTestSuite.ds = ds;
         conn = ds.getConnection();
         conn.createStatement().execute("CREATE TABLE TEST(id int PRIMARY KEY GENERATED ALWAYS AS IDENTITY, name VARCHAR(255) NOT NULL)");
+        conn.createStatement().execute("CREATE TABLE TEST1(id int PRIMARY KEY GENERATED ALWAYS AS IDENTITY, name VARCHAR(255) NOT NULL)");
         conn.createStatement().execute("CREATE PROCEDURE CREATETESTROW1(name_to_add VARCHAR(255)) DYNAMIC RESULT SETS 2 LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.createTestRow' PARAMETER STYLE JAVA");
         conn.createStatement().execute("CREATE PROCEDURE CREATETESTROW2(name_to_add VARCHAR(255)) LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testProcedure' PARAMETER STYLE JAVA");
         conn.createStatement().execute("CREATE PROCEDURE GETNAMEBYID(name_id INTEGER, OUT name_name VARCHAR(255)) LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testProcedureWithResults' PARAMETER STYLE JAVA");
         conn.createStatement().execute("CREATE PROCEDURE GETALLNAMES() DYNAMIC RESULT SETS 1 LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testNoArgProcedure' PARAMETER STYLE JAVA");
+        conn.createStatement().execute("CREATE PROCEDURE ECHO(row_id INTEGER) LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.echoProcedure' PARAMETER STYLE JAVA");
         conn.createStatement().execute("CREATE PROCEDURE P_GETROWBYID(id INTEGER) DYNAMIC RESULT SETS 1 LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testProcedureGetRowById' PARAMETER STYLE JAVA");
         conn.createStatement().execute("CREATE FUNCTION GETALLROWS() RETURNS TABLE (id INTEGER, name VARCHAR(255)) PARAMETER STYLE DERBY_JDBC_RESULT_SET READS SQL DATA LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testProcedureGetAllRows'");
         conn.createStatement().execute("CREATE FUNCTION GETROWBYID(id INTEGER) RETURNS TABLE (id INTEGER, name VARCHAR(255)) PARAMETER STYLE DERBY_JDBC_RESULT_SET READS SQL DATA LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testProcedureGetRowById'");
@@ -71,10 +73,12 @@ public class DBTestSuite {
     @AfterClass
     public static void destroy() throws Exception {
         conn.createStatement().execute("DROP TABLE TEST");
+        conn.createStatement().execute("DROP TABLE TEST1");
         conn.createStatement().execute("DROP PROCEDURE CREATETESTROW1");
         conn.createStatement().execute("DROP PROCEDURE CREATETESTROW2");
         conn.createStatement().execute("DROP PROCEDURE GETNAMEBYID");
         conn.createStatement().execute("DROP PROCEDURE GETALLNAMES");
+        conn.createStatement().execute("DROP PROCEDURE ECHO");
         conn.createStatement().execute("DROP PROCEDURE P_GETROWBYID");
         conn.createStatement().execute("DROP FUNCTION GETALLROWS");
         conn.createStatement().execute("DROP FUNCTION GETROWBYID");
@@ -85,12 +89,28 @@ public class DBTestSuite {
     @Before
     public void reset() throws Exception {
         conn.createStatement().executeUpdate("TRUNCATE TABLE TEST");
+        conn.createStatement().executeUpdate("TRUNCATE TABLE TEST1");
         conn.createStatement().executeUpdate("ALTER TABLE TEST ALTER COLUMN ID RESTART WITH 1");
+        conn.createStatement().executeUpdate("ALTER TABLE TEST1 ALTER COLUMN ID RESTART WITH 1");
         PreparedStatement ps = conn.prepareStatement("INSERT INTO TEST(name) VALUES(?)");
+        PreparedStatement ps1 = conn.prepareStatement("INSERT INTO TEST1(name) VALUES(?)");
         for (int i = 0; i < 10; i++) {
             ps.setString(1, "name_" + (i + 1));
+            ps1.setString(1, "name_" + (i + 1));
+            ps1.execute();
             ps.execute();
         }
+    }
+
+    @Test
+    public void testMeta() throws Exception {
+        PreparedStatement pst = conn.prepareStatement("SELECT t1.name AS \"name1\", t2.name AS \"name2\" FROM test t1 JOIN test1 t2 ON t1.id = t2.id");
+        ResultSetMetaData meta = pst.getMetaData();
+        int columnCount = meta.getColumnCount();
+        for (int col = 1; col <= columnCount; col++) {
+            System.out.println(String.format("%s.%s:%s", meta.getTableName(col), meta.getColumnLabel(col), meta.getColumnClassName(col)));
+        }
+        pst.close();
     }
 
     @Test
@@ -334,21 +354,21 @@ public class DBTestSuite {
     @Test
     public void testScript() throws Exception {
         System.out.println(db.script(
-                "CREATE TABLE TEST1(id int PRIMARY KEY generated always as IDENTITY, name VARCHAR(255) NOT NULL);" +
-                        "ALTER TABLE TEST1 ADD COLUMN surname VARCHAR(255);" +
-                        "INSERT INTO TEST1(name, surname) VALUES ('test1', 'test2');" +
-                        "DROP TABLE TEST1;" +
+                "CREATE TABLE TEST2(id int PRIMARY KEY generated always as IDENTITY, name VARCHAR(255) NOT NULL);" +
+                        "ALTER TABLE TEST2 ADD COLUMN surname VARCHAR(255);" +
+                        "INSERT INTO TEST2(name, surname) VALUES ('test1', 'test2');" +
+                        "DROP TABLE TEST2;" +
                         "{call GETALLNAMES()};"
-        ).print().verbose().timeout(1).errorHandler(System.err::println).execute());
+        ).print().verbose().timeout(1).skipErrors(false).skipWarnings(false).execute());
     }
 
     @Test
     public void testScriptWithNamedParameters() throws Exception {
         System.out.println(db.script(
-                "CREATE TABLE TEST1(id int PRIMARY KEY generated always as IDENTITY, name VARCHAR(255) NOT NULL);" +
-                        "ALTER TABLE TEST1 ADD COLUMN surname VARCHAR(255);" +
-                        "INSERT INTO TEST1(name, surname) VALUES (:name, :surname);" +
-                        "DROP TABLE TEST1;" +
+                "CREATE TABLE TEST2(id int PRIMARY KEY generated always as IDENTITY, name VARCHAR(255) NOT NULL);" +
+                        "ALTER TABLE TEST2 ADD COLUMN surname VARCHAR(255);" +
+                        "INSERT INTO TEST2(name, surname) VALUES (:name, :surname);" +
+                        "DROP TABLE TEST2;" +
                         "{call GETALLNAMES()};",
                 new SimpleImmutableEntry<>("name", "Name"),
                 new SimpleImmutableEntry<>("surname", "SurName")
@@ -421,12 +441,13 @@ public class DBTestSuite {
     public void testTransactions() throws Exception {
         Long result = db.transaction(false, TransactionIsolation.SERIALIZABLE, db ->
                 db.update("INSERT INTO test(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
+                        .batch(true)
                         .skipWarnings(false)
                         .timeout(1, TimeUnit.MINUTES)
                         .print()
                         .execute(
                                 rs -> rs.getLong(1),
-                                keys -> db.select("SELECT * FROM test WHERE id=?", keys.max(Comparator.comparing(i -> i)).orElse(-1L)).print().single(rs -> rs.getLong(1))
+                                keys -> db.select("SELECT * FROM test WHERE id=?", keys.peek(key -> db.procedure("call ECHO(?)", key).call()).max(Comparator.comparing(i -> i)).orElse(-1L)).print().single(rs -> rs.getLong(1))
                         )
                         .orElse(null)
         );
@@ -565,6 +586,11 @@ public class DBTestSuite {
     public void testSingleQuery() throws Exception {
         String query = "SELECT * FROM TEST';' SELECT * FROM TEST";
         checkSingle(query);
+    }
+
+    @Test
+    public void testNamedParams() throws Exception {
+        db.select("SELECT * FROM TEST WHERE id=:id AND id=:id", new SimpleImmutableEntry<>("id", 7)).print();
     }
 
 }

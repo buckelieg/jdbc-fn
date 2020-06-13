@@ -55,6 +55,10 @@ public class DerbyStoredProcedures {
         }
     }
 
+    public static void echoProcedure(int id) throws SQLException {
+        LOG.debug(String.format("echoProcedure(%s)", id));
+    }
+
     public static void testProcedureWithResults(int id, String[] name) throws SQLException {
         LOG.debug("Calling testProcedureWithResults...");
         try (Connection conn = getConnection("jdbc:default:connection"); PreparedStatement stmt = conn.prepareStatement("SELECT NAME FROM TEST WHERE ID=?")) {
@@ -79,6 +83,7 @@ public class DerbyStoredProcedures {
         LOG.debug("Calling testProcedureGetAllRows...");
         return getConnection("jdbc:default:connection").prepareStatement("SELECT * FROM TEST").executeQuery();
     }
+
     public static ResultSet testProcedureGetRowById(int id) throws SQLException {
         LOG.debug("Calling testProcedureGetRowById...");
         Connection conn = getConnection("jdbc:default:connection");

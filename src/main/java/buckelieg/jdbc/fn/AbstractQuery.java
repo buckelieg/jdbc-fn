@@ -35,6 +35,11 @@ abstract class AbstractQuery<S extends Statement> implements Query {
     protected final Connection connection;
     protected final boolean autoCommit;
     protected boolean skipWarnings = true;
+    protected boolean isPrepared;
+    protected int timeout;
+    protected TimeUnit unit = TimeUnit.SECONDS;
+    protected boolean isPoolable;
+    protected boolean isEscaped = true;
 
     AbstractQuery(Connection connection, String query, Object... params) {
         try {

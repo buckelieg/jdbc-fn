@@ -74,7 +74,7 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
 
     @Override
     protected void doExecute() {
-        withStatement(s -> s.execute() ? rs = s.getResultSet() : null);
+        withStatement(s -> rs = (isPrepared ? ((CallableStatement)s).execute() : s.execute(query)) ? s.getResultSet() : null);
     }
 
     protected boolean doHasNext() {
@@ -90,7 +90,7 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
                     return super.doHasNext();
                 }
                 try {
-                    if (mapper != null && consumer != null) {
+                    if (mapper != null && consumer != null && isPrepared) {
                         consumer.accept(withStatement(statement -> mapper.apply(new ImmutableCallableStatement((CallableStatement) statement))));
                     }
                 } finally {
@@ -102,23 +102,26 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
     }
 
     @Override
-    CallableStatement prepareStatement(Connection connection, String query, Object... params) throws SQLException {
-        CallableStatement cs = connection.prepareCall(query);
-        for (int i = 1; i <= params.length; i++) {
-            P<?> p = (P<?>) params[i - 1];
-            if (p.isOut() || p.isInOut()) {
-                SQLType type = requireNonNull(p.getType(), format("Parameter '%s' must have SQLType set", p));
-                try {
-                    cs.registerOutParameter(i, type);
-                } catch (SQLFeatureNotSupportedException e) {
-                    // fallback to previous version of JDBC
-                    cs.registerOutParameter(i, type.getVendorTypeNumber());
+    Statement prepareStatement(Connection connection, String query, Object... params) throws SQLException {
+        if(isPrepared = params != null && params.length != 0) {
+            CallableStatement cs = connection.prepareCall(query);
+            for (int i = 1; i <= params.length; i++) {
+                P<?> p = (P<?>) params[i - 1];
+                if (p.isOut() || p.isInOut()) {
+                    SQLType type = requireNonNull(p.getType(), format("Parameter '%s' must have SQLType set", p));
+                    try {
+                        cs.registerOutParameter(i, type);
+                    } catch (SQLFeatureNotSupportedException e) {
+                        // fallback to previous version of JDBC
+                        cs.registerOutParameter(i, type.getVendorTypeNumber());
+                    }
+                }
+                if (p.isIn() || p.isInOut()) {
+                    cs.setObject(i, p.getValue());
                 }
             }
-            if (p.isIn() || p.isInOut()) {
-                cs.setObject(i, p.getValue());
-            }
+            return cs;
         }
-        return cs;
+        return connection.createStatement();
     }
 }
