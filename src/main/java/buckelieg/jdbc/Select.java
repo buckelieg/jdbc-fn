@@ -517,7 +517,20 @@ public interface Select extends Query {
     }
 
     /**
-     * Shorthand for stream mapping for list
+     * Shorthand for stream mapping to list
+     *
+     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
+     * @return a {@link List} over mapped {@link ResultSet}
+     * @see Stream#collect(Collector)
+     * @see java.util.stream.Collectors#toList
+     */
+    @Nonnull
+    default <T> List<T> list(TryBiFunction<ResultSet, Integer, T, SQLException> mapper) {
+        return stream(mapper).collect(toList());
+    }
+
+    /**
+     * Shorthand for stream mapping to list
      *
      * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
      * @return a {@link List} over mapped {@link ResultSet}
@@ -537,7 +550,7 @@ public interface Select extends Query {
      */
     @Nonnull
     default List<Map<String, Object>> list() {
-        return list(new DefaultMapper());
+        return execute().collect(toList());
     }
 
     /**

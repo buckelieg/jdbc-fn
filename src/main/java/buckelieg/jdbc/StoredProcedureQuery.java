@@ -22,7 +22,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.ParametersAreNonnullByDefault;
 import javax.annotation.concurrent.NotThreadSafe;
 import java.sql.*;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
@@ -30,7 +29,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
-import static buckelieg.jdbc.Utils.defaultMapper;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 
@@ -64,12 +62,6 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
             }
             return mapper.get().apply(rs);
         });
-    }
-
-    @Nonnull
-    @Override
-    public List<Map<String, Object>> list() {
-        return list(defaultMapper);
     }
 
     @Nonnull
