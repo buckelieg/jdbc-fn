@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.jdbc;
 
 import org.apache.log4j.Logger;
 

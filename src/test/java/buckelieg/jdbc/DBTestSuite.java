@@ -13,8 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.jdbc;
 
+import buckelieg.jdbc.fn.TryConsumer;
 import org.apache.derby.jdbc.EmbeddedDataSource;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -29,7 +30,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
-import static buckelieg.jdbc.fn.Utils.*;
+import static buckelieg.jdbc.Utils.*;
 import static java.lang.Thread.currentThread;
 import static java.util.AbstractMap.SimpleImmutableEntry;
 import static java.util.Collections.singletonList;
@@ -56,14 +57,14 @@ public class DBTestSuite {
         conn = ds.getConnection();
         conn.createStatement().execute("CREATE TABLE TEST(id int PRIMARY KEY GENERATED ALWAYS AS IDENTITY, name VARCHAR(255) NOT NULL)");
         conn.createStatement().execute("CREATE TABLE TEST1(id int PRIMARY KEY GENERATED ALWAYS AS IDENTITY, name VARCHAR(255) NOT NULL)");
-        conn.createStatement().execute("CREATE PROCEDURE CREATETESTROW1(name_to_add VARCHAR(255)) DYNAMIC RESULT SETS 2 LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.createTestRow' PARAMETER STYLE JAVA");
-        conn.createStatement().execute("CREATE PROCEDURE CREATETESTROW2(name_to_add VARCHAR(255)) LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testProcedure' PARAMETER STYLE JAVA");
-        conn.createStatement().execute("CREATE PROCEDURE GETNAMEBYID(name_id INTEGER, OUT name_name VARCHAR(255)) LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testProcedureWithResults' PARAMETER STYLE JAVA");
-        conn.createStatement().execute("CREATE PROCEDURE GETALLNAMES() DYNAMIC RESULT SETS 1 LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testNoArgProcedure' PARAMETER STYLE JAVA");
-        conn.createStatement().execute("CREATE PROCEDURE ECHO(row_id INTEGER) LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.echoProcedure' PARAMETER STYLE JAVA");
-        conn.createStatement().execute("CREATE PROCEDURE P_GETROWBYID(id INTEGER) DYNAMIC RESULT SETS 1 LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testProcedureGetRowById' PARAMETER STYLE JAVA");
-        conn.createStatement().execute("CREATE FUNCTION GETALLROWS() RETURNS TABLE (id INTEGER, name VARCHAR(255)) PARAMETER STYLE DERBY_JDBC_RESULT_SET READS SQL DATA LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testProcedureGetAllRows'");
-        conn.createStatement().execute("CREATE FUNCTION GETROWBYID(id INTEGER) RETURNS TABLE (id INTEGER, name VARCHAR(255)) PARAMETER STYLE DERBY_JDBC_RESULT_SET READS SQL DATA LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.fn.DerbyStoredProcedures.testProcedureGetRowById'");
+        conn.createStatement().execute("CREATE PROCEDURE CREATETESTROW1(name_to_add VARCHAR(255)) DYNAMIC RESULT SETS 2 LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.DerbyStoredProcedures.createTestRow' PARAMETER STYLE JAVA");
+        conn.createStatement().execute("CREATE PROCEDURE CREATETESTROW2(name_to_add VARCHAR(255)) LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.DerbyStoredProcedures.testProcedure' PARAMETER STYLE JAVA");
+        conn.createStatement().execute("CREATE PROCEDURE GETNAMEBYID(name_id INTEGER, OUT name_name VARCHAR(255)) LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.DerbyStoredProcedures.testProcedureWithResults' PARAMETER STYLE JAVA");
+        conn.createStatement().execute("CREATE PROCEDURE GETALLNAMES() DYNAMIC RESULT SETS 1 LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.DerbyStoredProcedures.testNoArgProcedure' PARAMETER STYLE JAVA");
+        conn.createStatement().execute("CREATE PROCEDURE ECHO(row_id INTEGER) LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.DerbyStoredProcedures.echoProcedure' PARAMETER STYLE JAVA");
+        conn.createStatement().execute("CREATE PROCEDURE P_GETROWBYID(id INTEGER) DYNAMIC RESULT SETS 1 LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.DerbyStoredProcedures.testProcedureGetRowById' PARAMETER STYLE JAVA");
+        conn.createStatement().execute("CREATE FUNCTION GETALLROWS() RETURNS TABLE (id INTEGER, name VARCHAR(255)) PARAMETER STYLE DERBY_JDBC_RESULT_SET READS SQL DATA LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.DerbyStoredProcedures.testProcedureGetAllRows'");
+        conn.createStatement().execute("CREATE FUNCTION GETROWBYID(id INTEGER) RETURNS TABLE (id INTEGER, name VARCHAR(255)) PARAMETER STYLE DERBY_JDBC_RESULT_SET READS SQL DATA LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.DerbyStoredProcedures.testProcedureGetRowById'");
 //        db = new DB(() -> conn);
 //        db = new DB(conn);
         db = new DB(ds::getConnection);
@@ -359,7 +360,7 @@ public class DBTestSuite {
                         "INSERT INTO TEST2(name, surname) VALUES ('test1', 'test2');" +
                         "DROP TABLE TEST2;" +
                         "{call GETALLNAMES()};"
-        ).print().verbose().timeout(1).skipErrors(false).skipWarnings(false).execute());
+        ).print().verbose().timeout(1, TimeUnit.MINUTES).skipErrors(false).skipWarnings(false).execute());
     }
 
     @Test
@@ -372,7 +373,7 @@ public class DBTestSuite {
                         "{call GETALLNAMES()};",
                 new SimpleImmutableEntry<>("name", "Name"),
                 new SimpleImmutableEntry<>("surname", "SurName")
-        ).print().verbose().timeout(1).errorHandler(System.err::println).execute());
+        ).print().verbose().timeout(1, TimeUnit.MINUTES).errorHandler(System.err::println).execute());
     }
 
     @Test
@@ -572,7 +573,7 @@ public class DBTestSuite {
     }
 
     @Test
-    public void testConnections() throws Exception {
+    public void testReopening() throws Exception {
 //        Connection c = ds.getConnection();
 //        DB db = new DB(ds);
         assertEquals(10, db.select("SELECT * FROM TEST").list().size());
@@ -591,6 +592,63 @@ public class DBTestSuite {
     @Test
     public void testNamedParams() throws Exception {
         db.select("SELECT * FROM TEST WHERE id=:id AND id=:id", new SimpleImmutableEntry<>("id", 7)).print();
+    }
+
+    @Test
+    public void testSelectForUpdate() throws Exception {
+        List<String> oldNames = db.select("SELECT name FROM TEST").list(rs -> rs.getString("name"));
+        List<String> newNames = db.select("SELECT * FROM TEST")
+                .forUpdate(rs -> rs.getString(2), (name2, rs) -> {})
+                .onUpdated((nameOld, nameNew) -> System.out.println(String.format("%s -> %s", nameOld, nameNew)))
+                .list(Arrays.asList("name222", "name3333"));
+        assertEquals(oldNames, newNames);
+        List<Map<String, Object>> updated = db.select("SELECT * FROM TEST")
+                .forUpdate()
+                .list(
+                        Arrays.asList(
+                                of("ID", 1, "NAME", "nameNew", "NAME2", "WOW"),
+                                of("ID", 3, "NAME", "name______22", null, null),
+                                of("ID", 2, "NAME", "name_3", null, null)
+                        )
+                );
+        List<Map<String, Object>> selected = db.select("SELECT * FROM TEST").list();
+        assertEquals(updated, selected);
+    }
+
+    @Test
+    public void testSelectForInsert() throws Exception {
+        assertEquals(13, db.select("SELECT * FROM TEST").forInsert().list(Arrays.asList(
+                of("NAME", "nameNew", "NAME2", "WOW", null, null),
+                of("NAME", "name______22", null, null, null, null),
+                of("NAME", "name_3", null, null, null, null)
+        )).size());
+        System.out.println(db.select("SELECT * FROM TEST").list());
+    }
+
+    @Test
+    public void testSelectForDelete() throws Exception {
+        assertEquals(7, db.select("SELECT * FROM TEST")
+                .forDelete()
+                .onDeleted(row -> System.out.println(currentThread().getName() + " -> " + row))
+                .verbose(row -> System.out.println(currentThread().getName() + " -> " + row))
+                .list(
+                        Arrays.asList(
+                                of("ID", 1, "NAME", "nameNew", "NAME2", "WOW"),
+                                of("ID", 3, "NAME", "name______22", null, null),
+                                of("ID", 2, "NAME", "name_3", null, null)
+                        )).size()
+        );
+        System.out.println(db.select("SELECT * FROM TEST").list());
+    }
+
+    private static Map<String, Object> of(String key1, Object value1, String key2, Object value2, String key3, Object value3) {
+        Map<String, Object> map = new HashMap<>();
+        map.put(key1, value1);
+        map.put(key2, value2);
+        if (key3 != null) {
+            map.put(key3, value3);
+        }
+        return map;
     }
 
 }

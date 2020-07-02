@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.jdbc;
 
 import javax.annotation.Nonnull;
 import java.io.PrintStream;
@@ -40,6 +40,7 @@ public interface Query extends AutoCloseable {
      * @see StoredProcedure#execute()
      * @see Script#execute()
      */
+    @Nonnull
     <T> T execute();
 
     /**

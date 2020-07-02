@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.jdbc;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -24,19 +24,19 @@ import java.sql.SQLException;
 import java.sql.SQLWarning;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import static buckelieg.jdbc.fn.Utils.*;
+import static buckelieg.jdbc.Utils.*;
 import static java.lang.Math.max;
 import static java.lang.System.currentTimeMillis;
 import static java.util.Arrays.stream;
 import static java.util.Collections.emptyList;
 import static java.util.Objects.requireNonNull;
-import static java.util.concurrent.Executors.newSingleThreadExecutor;
 
 @NotThreadSafe
 @ParametersAreNonnullByDefault
@@ -50,9 +50,10 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     private final Connection connection;
     private final List<T> params;
     private String query;
-    private ExecutorService conveyor;
+    private final ExecutorService conveyor;
+    private final ConcurrentMap<String, RSMeta.Column> metaCache;
     private int timeout;
-    private TimeUnit unit;
+    private TimeUnit unit = TimeUnit.SECONDS;
     private Consumer<String> logger;
     private boolean escaped = true;
     private boolean skipErrors = true;
@@ -67,7 +68,9 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
      * @param script     an arbitrary SQL script to execute
      * @throws IllegalArgumentException in case of corrupted script (like illegal comment lines encountered)
      */
-    ScriptQuery(Connection connection, String script, @Nullable Iterable<T> namedParams) {
+    ScriptQuery(ExecutorService conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, Connection connection, String script, @Nullable Iterable<T> namedParams) {
+        this.conveyor = conveyor;
+        this.metaCache = metaCache;
         this.connection = connection;
         this.script = script;
         this.params = namedParams == null ? emptyList() : StreamSupport.stream(namedParams.spliterator(), false).collect(Collectors.toList());
@@ -84,19 +87,15 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     @Override
     public Long execute() {
         try {
-            return doInTransaction(false, () -> connection, null, conn -> {
-                long start = currentTimeMillis();
-                if (timeout == 0) {
-                    doExecute();
-                }
-                conveyor = newSingleThreadExecutor(); // TODO implement executor that uses current thread
+            if (timeout == 0) {
+                return doExecute();
+            } else {
                 try {
-                    conveyor.submit(this::doExecute).get(timeout, unit);
+                    return conveyor.submit(this::doExecute).get(timeout, unit);
                 } catch (Exception e) {
                     throw new SQLException(e);
                 }
-                return currentTimeMillis() - start;
-            });
+            }
         } catch (Exception e) {
             throw newSQLRuntimeException(e);
         } finally {
@@ -104,27 +103,31 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
         }
     }
 
-    private void doExecute() {
-        for (String query : script.split(STATEMENT_DELIMITER)) {
-            try {
-                if (isAnonymous(query)) {
-                    executeQuery(new QueryImpl(connection, query));
-                } else {
-                    Map.Entry<String, Object[]> preparedQuery = prepareQuery(query, params);
-                    if (isProcedure(preparedQuery.getKey())) {
-                        new StoredProcedureQuery(connection, preparedQuery.getKey(), stream(preparedQuery.getValue()).map(p -> p instanceof P ? (P<?>) p : P.in(p)).toArray(P[]::new)).skipWarnings(skipWarnings).print(this::log).call();
+    private long doExecute() throws SQLException {
+        return doInTransaction(false, () -> connection, null, conn -> {
+            long start = currentTimeMillis();
+            for (String query : script.split(STATEMENT_DELIMITER)) {
+                try {
+                    if (isAnonymous(query)) {
+                        executeQuery(new QueryImpl(conn, query));
                     } else {
-                        executeQuery(new QueryImpl(connection, preparedQuery.getKey(), preparedQuery.getValue()));
+                        Map.Entry<String, Object[]> preparedQuery = prepareQuery(query, params);
+                        if (isProcedure(preparedQuery.getKey())) {
+                            new StoredProcedureQuery(conveyor, metaCache, conn, preparedQuery.getKey(), stream(preparedQuery.getValue()).map(p -> p instanceof P ? (P<?>) p : P.in(p)).toArray(P[]::new)).skipWarnings(skipWarnings).print(this::log).call();
+                        } else {
+                            executeQuery(new QueryImpl(conn, preparedQuery.getKey(), preparedQuery.getValue()));
+                        }
+                    }
+                } catch (Exception e) {
+                    if (skipErrors) {
+                        errorHandler.accept(new SQLException(e));
+                    } else {
+                        throw newSQLRuntimeException(e);
                     }
                 }
-            } catch (Exception e) {
-                if (skipErrors) {
-                    errorHandler.accept(new SQLException(e));
-                } else {
-                    throw newSQLRuntimeException(e);
-                }
             }
-        }
+            return currentTimeMillis() - start;
+        });
     }
 
     private void executeQuery(Query query) {
@@ -205,11 +208,6 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
             query = Utils.asSQL(preparedScript.getKey(), preparedScript.getValue());
         }
         return query;
-    }
-
-    @Override
-    public void close() {
-        if (conveyor != null) conveyor.shutdownNow();
     }
 
 }

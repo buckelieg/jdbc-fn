@@ -13,7 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.jdbc;
+
+import buckelieg.jdbc.fn.TryAction;
+import buckelieg.jdbc.fn.TryConsumer;
+import buckelieg.jdbc.fn.TrySupplier;
 
 import javax.annotation.Nonnull;
 import java.sql.Connection;
@@ -22,7 +26,7 @@ import java.sql.Statement;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-import static buckelieg.jdbc.fn.Utils.newSQLRuntimeException;
+import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static java.lang.Math.max;
 import static java.util.Objects.requireNonNull;
 
@@ -35,18 +39,22 @@ abstract class AbstractQuery<S extends Statement> implements Query {
     protected final Connection connection;
     protected final boolean autoCommit;
     protected boolean skipWarnings = true;
-    protected boolean isPrepared;
+    protected final boolean isPrepared;
     protected int timeout;
     protected TimeUnit unit = TimeUnit.SECONDS;
     protected boolean isPoolable;
     protected boolean isEscaped = true;
+    protected boolean poolable;
+    protected boolean escapeProcessing;
+    protected final Object[] params;
 
     AbstractQuery(Connection connection, String query, Object... params) {
         try {
             this.query = query;
             this.connection = connection;
+            this.params = params;
             this.autoCommit = connection.getAutoCommit();
-            this.statement = prepareStatement(connection, query, params);
+            this.isPrepared = params != null && params.length != 0;
             this.sqlString = asSQL(query, params);
         } catch (SQLException e) {
             throw newSQLRuntimeException(e);
@@ -55,23 +63,43 @@ abstract class AbstractQuery<S extends Statement> implements Query {
 
     @Override
     public void close() {
-        jdbcTry(statement::close); // by JDBC spec: subsequently closes all result sets opened by this statement
+        try {
+            statement.close(); // by JDBC spec: subsequently closes all result sets opened by this statement
+        } catch (SQLException e) {
+            throw newSQLRuntimeException(e);
+        }
+    }
+
+    final void setTimeout() {
+        setStatementParameter(statement -> statement.setQueryTimeout(max((int) requireNonNull(unit, "Time Unit must be provided").toSeconds(timeout), 0)));
+    }
+
+    final void setPoolable() {
+        setStatementParameter(statement -> statement.setPoolable(poolable));
+    }
+
+    final void setEscapeProcessing() {
+        setStatementParameter(statement -> statement.setEscapeProcessing(escapeProcessing));
     }
 
     final <Q extends Query> Q setTimeout(int timeout, TimeUnit unit) {
-        return setStatementParameter(statement -> statement.setQueryTimeout(max((int) requireNonNull(unit, "Time Unit must be provided").toSeconds(timeout), 0)));
+        this.timeout = timeout;
+        this.unit = requireNonNull(unit, "Time unit must be provided");
+        return (Q) this;
     }
 
     final <Q extends Query> Q setPoolable(boolean poolable) {
-        return setStatementParameter(statement -> statement.setPoolable(poolable));
-    }
-
-    final <Q extends Query> Q setEscapeProcessing(boolean escapeProcessing) {
-        return setStatementParameter(statement -> statement.setEscapeProcessing(escapeProcessing));
+        this.poolable = poolable;
+        return (Q) this;
     }
 
     final <Q extends Query> Q setSkipWarnings(boolean skipWarnings) {
         this.skipWarnings = skipWarnings;
+        return (Q) this;
+    }
+
+    final <Q extends Query> Q setEscapeProcessing(boolean escapeProcessing) {
+        this.escapeProcessing = escapeProcessing;
         return (Q) this;
     }
 
@@ -84,11 +112,14 @@ abstract class AbstractQuery<S extends Statement> implements Query {
         O result = null;
         try {
             result = supplier.get();
+            if (!skipWarnings && statement.getWarnings() != null) {
+                throw statement.getWarnings();
+            }
+        } catch (AbstractMethodError ame) {
+            // ignore this possible vendor-specific JDBC driver's error.
         } catch (SQLException e) {
             close();
             throw newSQLRuntimeException(e);
-        } catch (AbstractMethodError ame) {
-            // ignore this possible vendor-specific JDBC driver's error.
         }
         return result;
     }
@@ -96,6 +127,9 @@ abstract class AbstractQuery<S extends Statement> implements Query {
     final void jdbcTry(TryAction<SQLException> action) {
         try {
             action.doTry();
+            if (!skipWarnings && statement.getWarnings() != null) {
+                throw statement.getWarnings();
+            }
         } catch (AbstractMethodError ame) {
             // ignore this possible vendor-specific JDBC driver's error.
         } catch (SQLException e) {
@@ -104,25 +138,9 @@ abstract class AbstractQuery<S extends Statement> implements Query {
         }
     }
 
-    final <O> O withStatement(TryFunction<S, O, SQLException> action) {
-        try {
-            O result = action.apply(statement);
-            if (!skipWarnings && statement.getWarnings() != null) {
-                throw statement.getWarnings();
-            }
-            return result;
-        } catch (SQLException e) {
-            close();
-            throw newSQLRuntimeException(e);
-        }
-    }
-
-    final <Q extends Query> Q setStatementParameter(TryConsumer<S, SQLException> action) {
+    final void setStatementParameter(TryConsumer<S, SQLException> action) {
         jdbcTry(() -> action.accept(statement));
-        return (Q) this;
     }
-
-    abstract S prepareStatement(Connection connection, String query, Object... params) throws SQLException;
 
     String asSQL(String query, Object... params) {
         return Utils.asSQL(query, params);

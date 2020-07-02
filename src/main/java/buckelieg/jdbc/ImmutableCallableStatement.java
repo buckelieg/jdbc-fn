@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.jdbc;
 
 import java.io.InputStream;
 import java.io.Reader;
@@ -23,7 +23,7 @@ import java.sql.*;
 import java.util.Calendar;
 import java.util.Map;
 
-import static buckelieg.jdbc.fn.Utils.EXCEPTION_MESSAGE;
+import static buckelieg.jdbc.Utils.EXCEPTION_MESSAGE;
 
 final class ImmutableCallableStatement implements CallableStatement {
 
@@ -89,6 +89,7 @@ final class ImmutableCallableStatement implements CallableStatement {
     }
 
     @Override
+    @Deprecated
     public BigDecimal getBigDecimal(int parameterIndex, int scale) throws SQLException {
         return delegate.getBigDecimal(parameterIndex, scale);
     }
@@ -684,6 +685,7 @@ final class ImmutableCallableStatement implements CallableStatement {
     }
 
     @Override
+    @Deprecated
     public void setUnicodeStream(int parameterIndex, InputStream x, int length) throws SQLException {
         throw new SQLException(EXCEPTION_MESSAGE);
     }

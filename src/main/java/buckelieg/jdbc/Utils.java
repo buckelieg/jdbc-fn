@@ -13,7 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.jdbc;
+
+import buckelieg.jdbc.fn.TryBiFunction;
+import buckelieg.jdbc.fn.TryFunction;
+import buckelieg.jdbc.fn.TrySupplier;
+import buckelieg.jdbc.fn.TryTriConsumer;
 
 import javax.annotation.Nonnull;
 import java.io.BufferedReader;
@@ -23,9 +28,12 @@ import java.sql.*;
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.*;
 import java.util.Map.Entry;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import static java.lang.String.format;
 import static java.sql.JDBCType.*;
@@ -38,7 +46,7 @@ import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Stream.of;
 import static java.util.stream.StreamSupport.stream;
 
-final class Utils {
+public final class Utils {
 
     static final String EXCEPTION_MESSAGE = "Unsupported operation";
     static final String STATEMENT_DELIMITER = ";";
@@ -58,6 +66,7 @@ final class Utils {
     ));
 
     private static final Map<SQLType, TryBiFunction<ResultSet, Integer, Object, SQLException>> defaultReaders = new HashMap<>();
+    private static final Map<SQLType, TryTriConsumer<ResultSet, Integer, Object, SQLException>> defaultWriters = new HashMap<>();
 
     static {
         // standard "recommended" readers
@@ -203,42 +212,52 @@ final class Utils {
         return !NAMED_PARAMETER.matcher(query).find();
     }
 
-    static SQLRuntimeException newSQLRuntimeException(Throwable t) {
-        StringBuilder message = new StringBuilder(format("%s ", t.getMessage()));
-        while ((t = t.getCause()) != null) {
-            ofNullable(t.getMessage()).map(msg -> format("%s ", msg.trim())).filter(msg -> !message.toString().equals(msg)).ifPresent(message::append);
+    static SQLRuntimeException newSQLRuntimeException(Throwable... throwables) {
+        StringBuilder messages = new StringBuilder();
+        for (Throwable throwable : throwables) {
+            Throwable t = throwable;
+            StringBuilder message = new StringBuilder(format("%s ", t.getMessage()));
+            AtomicReference<String> prevMsg = new AtomicReference<>();
+            while ((t = t.getCause()) != null) {
+                ofNullable(t.getMessage()).map(msg -> format("%s ", msg.trim())).filter(msg -> prevMsg.get() != null && prevMsg.get().equals(msg)).ifPresent(message::append);
+                prevMsg.set(t.getMessage() != null ? t.getMessage().trim() : null);
+            }
+            messages.append(message);
         }
-        return new SQLRuntimeException(message.toString().trim(), false);
+        return new SQLRuntimeException(messages.toString().trim(), false);
     }
 
+    @SuppressWarnings("SynchronizationOnLocalVariableOrMethodParameter")
     static <T> T doInTransaction(boolean forceClose, TrySupplier<Connection, SQLException> connectionSupplier, TransactionIsolation isolationLevel, TryFunction<Connection, T, SQLException> action) throws SQLException {
         Connection conn = connectionSupplier.get();
-        boolean autoCommit = true;
-        Savepoint savepoint = null;
-        int isolation = conn.getTransactionIsolation();
-        T result;
-        try {
-            autoCommit = conn.getAutoCommit();
-            conn.setAutoCommit(false);
-            savepoint = conn.setSavepoint();
-            if (isolationLevel != null && isolation != isolationLevel.level) {
-                if (!conn.getMetaData().supportsTransactionIsolationLevel(isolationLevel.level)) {
-                    throw new IllegalArgumentException(format("Unsupported transaction isolation level: '%s'", isolationLevel.name()));
+        synchronized (conn) {
+            boolean autoCommit = true;
+            Savepoint savepoint = null;
+            int isolation = conn.getTransactionIsolation();
+            T result;
+            try {
+                autoCommit = conn.getAutoCommit();
+                conn.setAutoCommit(false);
+                savepoint = conn.setSavepoint();
+                if (isolationLevel != null && isolation != isolationLevel.level) {
+                    if (!conn.getMetaData().supportsTransactionIsolationLevel(isolationLevel.level)) {
+                        throw new IllegalArgumentException(format("Unsupported transaction isolation level: '%s'", isolationLevel.name()));
+                    }
+                    conn.setTransactionIsolation(isolationLevel.level);
                 }
-                conn.setTransactionIsolation(isolationLevel.level);
-            }
-            result = action.apply(conn);
-            conn.commit();
-            return result;
-        } catch (SQLException e) {
-            conn.rollback(savepoint);
-            conn.releaseSavepoint(savepoint);
-            throw e;
-        } finally {
-            conn.setAutoCommit(autoCommit);
-            conn.setTransactionIsolation(isolation);
-            if (forceClose) {
-                conn.close();
+                result = action.apply(conn);
+                conn.commit();
+                return result;
+            } catch (SQLException e) {
+                conn.rollback(savepoint);
+                conn.releaseSavepoint(savepoint);
+                throw e;
+            } finally {
+                conn.setAutoCommit(autoCommit);
+                conn.setTransactionIsolation(isolation);
+                if (forceClose) {
+                    conn.close();
+                }
             }
         }
     }
@@ -302,6 +321,29 @@ final class Utils {
             idx++;
         }
         return replaced;
+    }
+
+    static <T> Stream<T> rsStream(ResultSet resultSet, TryFunction<ResultSet, T, SQLException> mapper) {
+        return StreamSupport.stream(new ResultSetSpliterator(resultSet), false)
+                .map(rs -> {
+                    try {
+                        return mapper.apply(rs);
+                    } catch (SQLException e) {
+                        try {
+                            rs.close();
+                        } catch (SQLException e1) {
+                            throw newSQLRuntimeException(e1);
+                        }
+                        throw newSQLRuntimeException(e);
+                    }
+                })
+                .onClose(() -> {
+                    try {
+                        resultSet.close();
+                    } catch (SQLException e) {
+                        throw newSQLRuntimeException(e);
+                    }
+                });
     }
 
 }

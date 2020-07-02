@@ -23,7 +23,6 @@ import static java.util.Objects.requireNonNull;
  *
  * @param <E> exception type
  */
-@SuppressWarnings("unchecked")
 @FunctionalInterface
 public interface TryAction<E extends Throwable> {
 

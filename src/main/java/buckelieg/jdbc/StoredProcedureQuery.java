@@ -13,7 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.jdbc;
+
+import buckelieg.jdbc.fn.TryFunction;
 
 import javax.annotation.Nonnull;
 import javax.annotation.ParametersAreNonnullByDefault;
@@ -21,10 +23,12 @@ import javax.annotation.concurrent.NotThreadSafe;
 import java.sql.*;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
-import static buckelieg.jdbc.fn.Utils.defaultMapper;
+import static buckelieg.jdbc.Utils.defaultMapper;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 
@@ -36,8 +40,8 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
     private TryFunction<CallableStatement, ?, SQLException> mapper;
     private Consumer consumer;
 
-    StoredProcedureQuery(Connection connection, String query, P<?>... params) {
-        super(connection, query, params);
+    StoredProcedureQuery(Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, Connection connection, String query, P<?>... params) {
+        super(conveyor, metaCache, connection, query, params);
     }
 
     @Nonnull
@@ -73,25 +77,26 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
     }
 
     @Override
-    protected void doExecute() {
-        withStatement(s -> rs = (isPrepared ? ((CallableStatement)s).execute() : s.execute(query)) ? s.getResultSet() : null);
+    protected void doExecute() throws SQLException {
+        rs = (isPrepared ? ((CallableStatement)statement).execute() : statement.execute(query)) ? statement.getResultSet() : null;
     }
 
     protected boolean doHasNext() {
         return jdbcTry(() -> {
             boolean moved = super.doHasNext();
             if (!moved) {
-                if (withStatement(Statement::getMoreResults)) {
+                if (statement.getMoreResults()) {
                     if (rs != null && !rs.isClosed()) {
                         rs.close();
                     }
-                    rs = withStatement(Statement::getResultSet);
+                    rs = statement.getResultSet();
+                    currentResultSetNumber++;
                     wrapper = new ImmutableResultSet(rs);
                     return super.doHasNext();
                 }
                 try {
                     if (mapper != null && consumer != null && isPrepared) {
-                        consumer.accept(withStatement(statement -> mapper.apply(new ImmutableCallableStatement((CallableStatement) statement))));
+                        consumer.accept(jdbcTry(() -> mapper.apply(new ImmutableCallableStatement((CallableStatement) statement))));
                     }
                 } finally {
                     close();
@@ -102,8 +107,8 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
     }
 
     @Override
-    Statement prepareStatement(Connection connection, String query, Object... params) throws SQLException {
-        if(isPrepared = params != null && params.length != 0) {
+    protected Statement prepareStatement() throws SQLException {
+        if(isPrepared) {
             CallableStatement cs = connection.prepareCall(query);
             for (int i = 1; i <= params.length; i++) {
                 P<?> p = (P<?>) params[i - 1];

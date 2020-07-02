@@ -15,17 +15,12 @@
  */
 /**
  * Functional style programming over plain JDBC
- * <br/>Function collection to be used in conjunction with main classes
+ * <br/>Two main classes to use:
+ * <br/><code>DB</code> - for full-featured usage
+ * <br/><code>Queries</code> - for simple cases usage
  *
- * @see buckelieg.jdbc.fn.TryAction
- * @see buckelieg.jdbc.fn.TryConsumer
- * @see buckelieg.jdbc.fn.TryBiConsumer
- * @see buckelieg.jdbc.fn.TryTriConsumer
- * @see buckelieg.jdbc.fn.TryQuadConsumer
- * @see buckelieg.jdbc.fn.TryFunction
- * @see buckelieg.jdbc.fn.TryBiFunction
- * @see buckelieg.jdbc.fn.TryPredicate
- * @see buckelieg.jdbc.fn.TryBiPredicate
- * @see buckelieg.jdbc.fn.TrySupplier
+ * @see buckelieg.jdbc.DB
+ * @see buckelieg.jdbc.Queries
+ *
  */
-package buckelieg.jdbc.fn;
+package buckelieg.jdbc;

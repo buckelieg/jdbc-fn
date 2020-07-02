@@ -54,6 +54,9 @@ public interface TryFunction<I, O, E extends Throwable> {
      * <br/>{@code TryFunction.of(x -> null).andThen(nil -> null);}
      *
      * @param tryFunction a function
+     * @param <I>         argument type
+     * @param <O>         result type
+     * @param <E>         exception type
      * @return lambda as {@link TryFunction} reference
      * @throws NullPointerException if tryFunction is null
      */

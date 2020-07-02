@@ -13,19 +13,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.jdbc;
+
+import buckelieg.jdbc.fn.TryBiFunction;
+import buckelieg.jdbc.fn.TryFunction;
 
 import javax.annotation.Nonnull;
 import javax.annotation.ParametersAreNonnullByDefault;
 import javax.annotation.concurrent.NotThreadSafe;
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
-import static buckelieg.jdbc.fn.Utils.*;
+import static buckelieg.jdbc.Utils.*;
 import static java.sql.Statement.RETURN_GENERATED_KEYS;
 import static java.util.Arrays.stream;
 import static java.util.Objects.requireNonNull;
@@ -37,6 +40,8 @@ import static java.util.stream.Stream.of;
 @NotThreadSafe
 @ParametersAreNonnullByDefault
 final class UpdateQuery extends AbstractQuery<Statement> implements Update {
+
+    private static final TryFunction<ResultSet, ResultSet, SQLException> NOOP = rs -> rs;
 
     private final Object[][] batch;
     private boolean isLarge;
@@ -122,11 +127,11 @@ final class UpdateQuery extends AbstractQuery<Statement> implements Update {
 
     @Nonnull
     public Long execute() {
-        return (long) jdbcTry(() -> batch.length > 1 ? doInTransaction(false, () -> connection, null, conn -> doExecute(connection, rs -> rs)) : doExecute(connection, rs -> rs));
+        return (long) jdbcTry(() -> batch.length > 1 ? doInTransaction(false, () -> connection, null, conn -> doExecute(connection, NOOP)) : doExecute(connection, NOOP));
     }
 
     private <K> Object doExecute(Connection conn, TryFunction<ResultSet, K, SQLException> valueMapper) throws SQLException {
-        if (isPrepared = useGeneratedKeys) {
+        if (useGeneratedKeys) {
             if (colNames != null && colNames.length != 0) {
                 statement = conn.prepareStatement(query, colNames);
             } else if (colIndices != null && colIndices.length != 0) {
@@ -135,25 +140,24 @@ final class UpdateQuery extends AbstractQuery<Statement> implements Update {
                 statement = conn.prepareStatement(query, RETURN_GENERATED_KEYS);
             }
         } else {
-            statement = (isPrepared = batch != null && batch.length != 0) ? conn.prepareStatement(query) : conn.createStatement();
+            statement = isPrepared ? conn.prepareStatement(query) : conn.createStatement();
         }
-        setPoolable(isPoolable);
-        setTimeout(timeout, unit);
-        setEscapeProcessing(isEscaped);
-        setSkipWarnings(skipWarnings);
-        return isBatch && conn.getMetaData().supportsBatchUpdates() ? useGeneratedKeys ? executeBatchWithGeneratedKeys(valueMapper) : executeBatch() : useGeneratedKeys ? executeSimpleWithGeneratedKeys(valueMapper) : executeSimple();
+        setPoolable();
+        setTimeout();
+        setEscapeProcessing();
+        return isBatch && conn.getMetaData().supportsBatchUpdates() ? useGeneratedKeys ? executeUpdateBatchWithGeneratedKeys(valueMapper) : executeUpdateBatch() : useGeneratedKeys ? executeUpdateWithGeneratedKeys(valueMapper) : executeUpdate();
     }
 
-    private <K> Stream<K> executeSimpleWithGeneratedKeys(TryFunction<ResultSet, K, SQLException> valueMapper) {
+    private <K> Stream<K> executeUpdateWithGeneratedKeys(TryFunction<ResultSet, K, SQLException> valueMapper) {
         return of(batch).onClose(this::close).reduce(
                 new ArrayList<K>(),
-                (genKeys, params) -> withStatement(s -> {
+                (genKeys, params) ->jdbcTry(() -> {
                     if (isLarge) {
-                        setStatementParameters((PreparedStatement) s, params).executeLargeUpdate();
+                        setStatementParameters((PreparedStatement) statement, params).executeLargeUpdate();
                     } else {
-                        setStatementParameters((PreparedStatement) s, params).executeUpdate();
+                        setStatementParameters((PreparedStatement) statement, params).executeUpdate();
                     }
-                    genKeys.addAll(StreamSupport.stream(new ResultSetSpliterator(s.getGeneratedKeys()), false).map(rs -> jdbcTry(() -> valueMapper.apply(rs))).collect(toList()));
+                    genKeys.addAll(collectGeneratedKeys(statement, valueMapper));
                     return genKeys;
                 }),
                 (list1, list2) -> {
@@ -163,57 +167,51 @@ final class UpdateQuery extends AbstractQuery<Statement> implements Update {
         ).stream();
     }
 
-    private <K> Stream<K> executeBatchWithGeneratedKeys(TryFunction<ResultSet, K, SQLException> valueMapper) {
-        return of(batch).onClose(this::close)
-                .map(params -> withStatement(statement -> {
-                    if (isPrepared) {
-                        setStatementParameters((PreparedStatement) statement, params).addBatch();
+    private <K> Stream<K> executeUpdateBatchWithGeneratedKeys(TryFunction<ResultSet, K, SQLException> valueMapper) {
+        return streamBatch().reduce(
+                new ArrayList<K>(),
+                (genKeys, s) -> jdbcTry(() -> {
+                    if (isLarge) {
+                        s.executeLargeBatch();
                     } else {
-                        statement.addBatch(query);
+                        s.executeBatch();
                     }
-                    return statement;
-                }))
-                .reduce(
-                        new ArrayList<K>(),
-                        (genKeys, s) -> jdbcTry(() -> {
-                            if (isLarge) {
-                                s.executeLargeBatch();
-                            } else {
-                                s.executeBatch();
-                            }
-                            genKeys.addAll(StreamSupport.stream(new ResultSetSpliterator(s.getGeneratedKeys()), false).map(rs -> jdbcTry(() -> valueMapper.apply(rs))).collect(toList()));
-                            return genKeys;
-                        }),
-                        (list1, list2) -> {
-                            list1.addAll(list2);
-                            return list1;
-                        }
-                ).stream();
+                    genKeys.addAll(collectGeneratedKeys(s, valueMapper));
+                    return genKeys;
+                }),
+                (list1, list2) -> {
+                    list1.addAll(list2);
+                    return list1;
+                }
+        ).stream();
     }
 
-    private long executeSimple() {
-        return of(batch).onClose(this::close).reduce(0L, (rowsAffected, params) -> rowsAffected += jdbcTry(() -> isLarge ? withStatement(s -> isPrepared ? setStatementParameters((PreparedStatement) s, params).executeLargeUpdate() : s.executeLargeUpdate(query)) : (long) withStatement(s -> isPrepared ? setStatementParameters((PreparedStatement) s, params).executeUpdate() : s.executeUpdate(query))), Long::sum);
+    private long executeUpdate() {
+        return of(batch).onClose(this::close).reduce(0L, (rowsAffected, params) -> rowsAffected += jdbcTry(() -> isLarge ? jdbcTry(() -> isPrepared ? setStatementParameters((PreparedStatement) statement, params).executeLargeUpdate() : statement.executeLargeUpdate(query)) : (long) jdbcTry(() -> isPrepared ? setStatementParameters((PreparedStatement) statement, params).executeUpdate() : statement.executeUpdate(query))), Long::sum);
     }
 
-    private long executeBatch() {
-        return of(batch).onClose(this::close).map(params -> withStatement(statement -> {
+    private long executeUpdateBatch() {
+        return streamBatch().reduce(0L, (rowsAffected, stmt) -> rowsAffected += stream(jdbcTry(() -> isLarge ? stmt.executeLargeBatch() : stream(stmt.executeBatch()).asLongStream().toArray())).sum(), Long::sum);
+    }
+
+    @Override
+    final String asSQL(String query, Object... params) {
+        return stream(params).flatMap(p -> of((Object[]) p)).map(p -> super.asSQL(query, (Object[]) p)).collect(joining(STATEMENT_DELIMITER));
+    }
+
+    private Stream<Statement> streamBatch() {
+        return of(batch).onClose(this::close).map(params -> jdbcTry(() -> {
             if (isPrepared) {
                 setStatementParameters((PreparedStatement) statement, params).addBatch();
             } else {
                 statement.addBatch(query);
             }
             return statement;
-        })).reduce(0L, (rowsAffected, stmt) -> rowsAffected += stream(jdbcTry(() -> isLarge ? stmt.executeLargeBatch() : stream(stmt.executeBatch()).asLongStream().toArray())).sum(), Long::sum);
+        }));
     }
 
-    @Override
-    PreparedStatement prepareStatement(Connection connection, String query, Object... params) {
-        return null;
-    }
-
-    @Override
-    final String asSQL(String query, Object... params) {
-        return stream(params).flatMap(p -> of((Object[]) p)).map(p -> super.asSQL(query, (Object[]) p)).collect(joining(STATEMENT_DELIMITER));
+    private <T> List<T> collectGeneratedKeys(Statement s, TryFunction<ResultSet, T, SQLException> valueMapper) throws SQLException {
+        return rsStream(s.getGeneratedKeys(), valueMapper).collect(toList());
     }
 
 }

@@ -13,7 +13,7 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-package buckelieg.jdbc.fn;
+package buckelieg.jdbc;
 
 import javax.annotation.Nonnull;
 import java.io.InputStream;
@@ -24,7 +24,7 @@ import java.sql.*;
 import java.util.Calendar;
 import java.util.Map;
 
-import static buckelieg.jdbc.fn.Utils.EXCEPTION_MESSAGE;
+import static buckelieg.jdbc.Utils.EXCEPTION_MESSAGE;
 import static java.util.Objects.requireNonNull;
 
 class ImmutableResultSet implements ResultSet {

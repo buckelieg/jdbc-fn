@@ -13,7 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.jdbc;
+
+import buckelieg.jdbc.fn.TrySupplier;
 
 import javax.annotation.Nonnull;
 import java.sql.ResultSet;
@@ -21,7 +23,7 @@ import java.sql.SQLException;
 import java.util.Spliterator;
 import java.util.function.Consumer;
 
-import static buckelieg.jdbc.fn.Utils.newSQLRuntimeException;
+import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static java.util.Objects.requireNonNull;
 
 final class ResultSetSpliterator implements Spliterator<ResultSet>, AutoCloseable {

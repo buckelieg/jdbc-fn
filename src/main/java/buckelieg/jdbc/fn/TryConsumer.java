@@ -21,19 +21,19 @@ import static java.util.Objects.requireNonNull;
  * One-argument function which returns no result that might throw an exception
  * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #accept(Object)}
  *
- * @param <T> the type of the input to the operation
+ * @param <I> the type of the input to the operation
  * @param <E> the type of the possible exception
  */
 @FunctionalInterface
-public interface TryConsumer<T, E extends Throwable> {
+public interface TryConsumer<I, E extends Throwable> {
 
     /**
      * Performs this operation on the given argument which might throw an exception
      *
-     * @param t the input argument
+     * @param i the input argument
      * @throws E an exception
      */
-    void accept(T t) throws E;
+    void accept(I i) throws E;
 
     /**
      * Returns reference of lambda expression
@@ -42,7 +42,7 @@ public interface TryConsumer<T, E extends Throwable> {
      * @return {@link TryConsumer} reference
      * @throws NullPointerException if tryConsumer is null
      */
-    static <T, E extends Throwable> TryConsumer<T, E> of(TryConsumer<T, E> tryConsumer) {
+    static <I, E extends Throwable> TryConsumer<I, E> of(TryConsumer<I, E> tryConsumer) {
         return requireNonNull(tryConsumer);
     }
 
@@ -59,11 +59,11 @@ public interface TryConsumer<T, E extends Throwable> {
      * @throws E                    an exception
      * @throws NullPointerException if {@code after} is null
      */
-    default TryConsumer<T, E> andThen(TryConsumer<? super T, E> after) throws E {
+    default TryConsumer<I, E> andThen(TryConsumer<? super I, E> after) throws E {
         requireNonNull(after);
-        return (T t) -> {
-            accept(t);
-            after.accept(t);
+        return (I i) -> {
+            accept(i);
+            after.accept(i);
         };
     }
 
@@ -80,11 +80,11 @@ public interface TryConsumer<T, E extends Throwable> {
      * @throws E                    an exception
      * @throws NullPointerException if {@code before} is null
      */
-    default TryConsumer<T, E> compose(TryConsumer<? super T, E> before) throws E {
+    default TryConsumer<I, E> compose(TryConsumer<? super I, E> before) throws E {
         requireNonNull(before);
-        return (T t) -> {
-            before.accept(t);
-            accept(t);
+        return (I i) -> {
+            before.accept(i);
+            accept(i);
         };
     }
 
