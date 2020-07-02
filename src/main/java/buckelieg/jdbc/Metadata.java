@@ -156,7 +156,7 @@ public interface Metadata {
      * Retrieves references table by this foreign key column
      *
      * @param columnIndex column index in the result
-     * @return a referenced table's full name (e.g. catalog.schema.name) or null if this column is not a foreign key
+     * @return a referenced table's full name (e.g. catalog.schema.name) if this column is not a foreign key
      */
     @Nonnull
     Optional<String> referencedTable(int columnIndex);
@@ -165,7 +165,7 @@ public interface Metadata {
      * Retrieves references table by this foreign key column
      *
      * @param columnName column name in the result
-     * @return a referenced table's full name (e.g. catalog.schema.name) or null if this column is not a foreign key
+     * @return a referenced table's full name (e.g. catalog.schema.name) if this column is not a foreign key
      */
     @Nonnull
     Optional<String> referencedTable(String columnName);

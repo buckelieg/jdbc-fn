@@ -500,6 +500,7 @@ public class DBTestSuite {
     public void testStoredProcedureRegexp() throws Exception {
         Stream.of(
                 new SimpleImmutableEntry<>("{call myProc()}", true),
+                new SimpleImmutableEntry<>("{CALL MYPROC()}", true),
                 new SimpleImmutableEntry<>("call myProc()", true),
                 new SimpleImmutableEntry<>("{call myProc}", true),
                 new SimpleImmutableEntry<>("call myProc", true),
@@ -524,6 +525,7 @@ public class DBTestSuite {
                 new SimpleImmutableEntry<>("{call}", false),
                 new SimpleImmutableEntry<>("call myProc(?,?,?,?,?)", true),
                 new SimpleImmutableEntry<>("call mySchema.myPackage.myProc()", true),
+                new SimpleImmutableEntry<>("CALL MYSCHEMA.MYPACKAGE.MYPROC()", true),
                 new SimpleImmutableEntry<>("call mySchema.myPackage.myProc(?)", true),
                 new SimpleImmutableEntry<>("call mySchema.myPackage.myProc(?, ?)", true),
                 new SimpleImmutableEntry<>("? = call mySchema.myPackage.myProc()", true),

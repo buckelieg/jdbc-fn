@@ -499,19 +499,15 @@ public final class DB implements AutoCloseable {
      * @param level     transaction isolation level (null -> default)
      * @param action    an action to be performed in transaction
      * @return an arbitrary result
-     * @throws NullPointerException          if no action is provided
+     * @throws NullPointerException          if no action or isolation level is provided
      * @throws UnsupportedOperationException if <code>createNew</code> is <code>true</code> but provided <code>connectionSupplier</code> cannot create new connection
-     * @throws IllegalArgumentException      desired transaction isolation level is not supported
+     * @throws IllegalArgumentException      if desired transaction isolation level is not supported
      * @see TransactionIsolation
      * @see TryFunction
      */
     @Nullable
-    public <T> T transaction(boolean createNew, @Nullable TransactionIsolation level, TryFunction<DB, T, SQLException> action) {
-        try {
-            return doInTransaction(createNew && connection != null, getConnectionSupplier(connectionSupplier, createNew), level, conn -> requireNonNull(action, "Action must be provided").apply(createNew && connection != null ? new DB(getConveyor(), metaCache, conn, connectionSupplier) : this));
-        } catch (SQLException e) {
-            throw newSQLRuntimeException(e);
-        }
+    public <T> T transaction(boolean createNew, TransactionIsolation level, TryFunction<DB, T, SQLException> action) {
+        return doInTransaction(createNew, requireNonNull(level, "Transaction isolation level must be provided"), action);
     }
 
     /**
@@ -526,7 +522,7 @@ public final class DB implements AutoCloseable {
      */
     @Nullable
     public <T> T transaction(boolean createNew, TryFunction<DB, T, SQLException> action) {
-        return transaction(createNew, null, action);
+        return doInTransaction(createNew, null, action);
     }
 
     /**
@@ -548,13 +544,22 @@ public final class DB implements AutoCloseable {
      * @param isolationLevel transaction isolation level to set
      * @param action         an action to be dne in transaction
      * @return an arbitrary result
-     * @throws NullPointerException     if no action is provided
+     * @throws NullPointerException     if no action or isolation level is provided
      * @throws IllegalArgumentException desired transaction isolation level is not supported
      * @see #transaction(boolean, TransactionIsolation, TryFunction)
      */
     @Nullable
     public <T> T transaction(TransactionIsolation isolationLevel, TryFunction<DB, T, SQLException> action) {
         return transaction(false, isolationLevel, action);
+    }
+
+    @Nullable
+    private <T> T doInTransaction(boolean createNew, @Nullable TransactionIsolation level, TryFunction<DB, T, SQLException> action) {
+        try {
+            return Utils.doInTransaction(createNew && connection != null, getConnectionSupplier(connectionSupplier, createNew), level, conn -> requireNonNull(action, "Action must be provided").apply(createNew && connection != null ? new DB(getConveyor(), metaCache, conn, connectionSupplier) : this));
+        } catch (SQLException e) {
+            throw newSQLRuntimeException(e);
+        }
     }
 
     private Select select(String query, Iterable<? extends Entry<String, ?>> namedParams) {

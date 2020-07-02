@@ -15,6 +15,7 @@
  */
 package buckelieg.jdbc;
 
+import buckelieg.jdbc.Utils.DefaultMapper;
 import buckelieg.jdbc.fn.TryFunction;
 
 import javax.annotation.Nonnull;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -55,7 +57,13 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
     @Nonnull
     @Override
     public Stream<Map<String, Object>> execute() {
-        return execute(defaultMapper);
+        AtomicReference<TryFunction<ResultSet, Map<String, Object>, SQLException>> mapper = new AtomicReference<>(new DefaultMapper());
+        return execute((rs, i) -> {
+            if(i != currentResultSetNumber) {
+                mapper.set(new DefaultMapper());
+            }
+            return mapper.get().apply(rs);
+        });
     }
 
     @Nonnull

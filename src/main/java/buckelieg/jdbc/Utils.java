@@ -63,7 +63,7 @@ public final class Utils {
             "\\{\\s*(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*\\}",
             "\\{\\s*(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*((\\(\\s*)\\?\\s*)(,\\s*\\?)*\\)\\s*\\}",
             "\\{\\s*(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*(\\(\\s*)\\)\\s*\\}"
-    ));
+    ), Pattern.CASE_INSENSITIVE);
 
     private static final Map<SQLType, TryBiFunction<ResultSet, Integer, Object, SQLException>> defaultReaders = new HashMap<>();
     private static final Map<SQLType, TryTriConsumer<ResultSet, Integer, Object, SQLException>> defaultWriters = new HashMap<>();
@@ -179,7 +179,7 @@ public final class Utils {
         return new SimpleImmutableEntry<>(checkAnonymous(query), indicesToValues.values().toArray());
     }
 
-    @SuppressWarnings("all")
+    @SuppressWarnings({"rawtypes", "unchecked", "OptionalUsedAsFieldOrParameterType"})
     private static Iterable<?> asIterable(Optional o) {
         Iterable<?> iterable;
         Object value = o.orElse(singletonList(null));

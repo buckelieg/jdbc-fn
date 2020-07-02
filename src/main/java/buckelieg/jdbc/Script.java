@@ -65,6 +65,13 @@ public interface Script extends Query {
      * {@inheritDoc}
      */
     @Nonnull
+    @Override
+    Script poolable(boolean poolable);
+
+    /**
+     * {@inheritDoc}
+     */
+    @Nonnull
     Script print(Consumer<String> printer);
 
     /**
