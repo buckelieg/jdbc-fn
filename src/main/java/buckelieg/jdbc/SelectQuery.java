@@ -114,8 +114,8 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     private boolean hasNext;
     private boolean hasMoved;
     private int fetchSize;
-    private int maxRowsInt;
-    private long maxRowsLong;
+    private int maxRowsInt = -1;
+    private long maxRowsLong = -1;
 
     SelectQuery(Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, Connection connection, String query, Object... params) {
         super(connection, query, params);
