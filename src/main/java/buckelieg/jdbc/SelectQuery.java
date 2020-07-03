@@ -38,9 +38,12 @@ import java.util.stream.StreamSupport;
 
 import static buckelieg.jdbc.Utils.setStatementParameters;
 import static java.lang.Math.max;
-import static java.util.Collections.emptyMap;
+import static java.util.Collections.singletonList;
 import static java.util.Objects.requireNonNull;
-import static java.util.stream.Collectors.*;
+import static java.util.Optional.ofNullable;
+import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toMap;
+import static java.util.stream.Stream.empty;
 
 @NotThreadSafe
 @ParametersAreNonnullByDefault
@@ -115,7 +118,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     private boolean hasMoved;
     private int fetchSize;
     private int maxRowsInt = -1;
-    private long maxRowsLong = -1;
+    private long maxRowsLong = -1L;
 
     SelectQuery(Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, Connection connection, String query, Object... params) {
         super(connection, query, params);
@@ -160,31 +163,50 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     public <T> ForInsert<T> forInsert(TryFunction<ResultSet, T, SQLException> mapper, TryTriConsumer<T, ResultSet, Metadata, SQLException> inserter) {
         requireNonNull(inserter, "Insert function must be provided");
         return new SelectForInsert<T>() {
+            @Override
+            public boolean single(T item) {
+                return doExecute(singletonList(requireNonNull(item, "Inserted item must be provided")), true).count() == 1;
+            }
+
             @Nonnull
             @Override
             public Stream<T> execute(Collection<T> toInsert) {
+                return doExecute(toInsert, false);
+            }
+
+            private Stream<T> doExecute(Collection<T> toInsert, boolean onlyInserted) {
                 requireNonNull(toInsert, "Insert collection must be provided");
                 isMutable = true;
-                Stream<T> stream = SelectQuery.this.execute(mapper);
+                Stream<T> stream = onlyInserted ? SelectQuery.this.fetchSize(1).maxRows(1).execute(mapper) : SelectQuery.this.execute(mapper);
                 wrapper = new MutableResultSet(rs);
                 Metadata meta = new RSMeta(connection, rs, metaCache);
-                return toInsert.isEmpty() ? stream : jdbcTry(() -> {
+                return toInsert.isEmpty() ? onlyInserted ? empty() : stream : jdbcTry(() -> {
                     rs.moveToInsertRow();
-                    for (T row : toInsert) {
-                        inserter.accept(row, wrapper, meta);
-                        if (((MutableResultSet) wrapper).updated) {
-                            rs.insertRow();
-                            if (insertedHandler != null) {
-                                conveyor.execute(() -> insertedHandler.accept(row));
-                            }
-                            if (logger != null) {
-                                logger.accept(row.toString());
-                            }
-                            ((MutableResultSet) wrapper).updated = false;
-                        }
+                    if (onlyInserted) {
+                        return toInsert.stream().filter(row -> doInsert(row, meta)).onClose(SelectQuery.this::close);
+                    } else {
+                        toInsert.forEach(row -> doInsert(row, meta));
+                        rs.moveToCurrentRow();
+                        return stream;
                     }
-                    rs.moveToCurrentRow();
-                    return stream;
+                });
+            }
+
+            private boolean doInsert(T row, Metadata meta) {
+                return jdbcTry(() -> {
+                    inserter.accept(row, wrapper, meta);
+                    if (((MutableResultSet) wrapper).updated) {
+                        rs.insertRow();
+                        if (insertedHandler != null) {
+                            conveyor.execute(() -> insertedHandler.accept(row));
+                        }
+                        if (logger != null) {
+                            logger.accept(row.toString());
+                        }
+                        ((MutableResultSet) wrapper).updated = false;
+                        return true;
+                    }
+                    return false;
                 });
             }
         };
@@ -195,12 +217,17 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     public <T> ForDelete<T> forDelete(TryFunction<ResultSet, T, SQLException> mapper, TryFunction<T, ?, SQLException> keyExtractor) {
         requireNonNull(keyExtractor, "Key extractor function must be provided");
         return new SelectForDelete<T>() {
+            @Override
+            public boolean single(T item) {
+                return doDelete(SelectQuery.this.execute(mapper), logger, deletedHandler, singletonList(requireNonNull(item, "Deleted item must be provided")), keyExtractor, true).count() == 1;
+            }
+
             @Nonnull
             @Override
             public Stream<T> execute(Collection<T> toDelete) {
                 requireNonNull(toDelete, "Delete collection must be provided");
                 isMutable = true;
-                return doDelete(SelectQuery.this.execute(mapper), logger, deletedHandler, toDelete, keyExtractor);
+                return doDelete(SelectQuery.this.execute(mapper), logger, deletedHandler, toDelete, keyExtractor, false);
             }
         };
     }
@@ -209,6 +236,11 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     @Override
     public ForDelete<Map<String, Object>> forDelete() {
         return new SelectForDelete<Map<String, Object>>() {
+            @Override
+            public boolean single(Map<String, Object> item) {
+                return execute(singletonList(requireNonNull(item, "Deleted item must be provided"))).count() == 1;
+            }
+
             @Nonnull
             @Override
             public Stream<Map<String, Object>> execute(Collection<Map<String, Object>> toDelete) {
@@ -216,15 +248,15 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
                 isMutable = true;
                 Stream<Map<String, Object>> stream = SelectQuery.this.execute();
                 RSMeta meta = new RSMeta(connection, rs, metaCache);
-                return doDelete(stream, logger, deletedHandler, toDelete, row -> meta.getPrimaryKeys().stream().map(pk -> new SimpleImmutableEntry<>(pk, row.get(pk))).collect(toMap(Map.Entry::getKey, Map.Entry::getValue)));
+                return doDelete(stream, logger, deletedHandler, toDelete, row -> meta.getPrimaryKeys().stream().map(pk -> new SimpleImmutableEntry<>(pk, row.get(pk))).collect(toMap(Map.Entry::getKey, Map.Entry::getValue)), false);
             }
         };
     }
 
-    private <T> Stream<T> doDelete(Stream<T> stream, @Nullable Consumer<String> logger, @Nullable Consumer<T> deletedHandler, Collection<T> toDelete, TryFunction<T, ?, SQLException> keyExtractor) {
+    private <T> Stream<T> doDelete(Stream<T> stream, @Nullable Consumer<String> logger, @Nullable Consumer<T> deletedHandler, Collection<T> toDelete, TryFunction<T, ?, SQLException> keyExtractor, boolean deletedOnly) {
         List<T> excluded = new ArrayList<>(toDelete.size());
         AtomicBoolean isRemovable = new AtomicBoolean(true);
-        return toDelete.isEmpty() ? stream : stream.filter(row -> jdbcTry(() -> {
+        return toDelete.isEmpty() ? deletedOnly ? empty() : stream : stream.filter(row -> jdbcTry(() -> {
             Iterator<T> it = toDelete.iterator();
             while (it.hasNext()) {
                 T deleted = it.next();
@@ -247,11 +279,11 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
                         if (logger != null) {
                             logger.accept(row.toString());
                         }
-                        return false;
+                        return deletedOnly;
                     }
                 }
             }
-            return true;
+            return !deletedOnly;
         }));
     }
 
@@ -260,9 +292,19 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     public <T> ForUpdate<T> forUpdate(TryFunction<ResultSet, T, SQLException> mapper, TryQuadConsumer<T, T, ResultSet, Metadata, SQLException> updater) {
         requireNonNull(updater, "Updater must be provided");
         return new SelectForUpdate<T>() {
+
+            @Override
+            public boolean single(T item) {
+                return doExecute(singletonList(requireNonNull(item, "Updated item must be provided")), true).count() == 1;
+            }
+
             @Nonnull
             @Override
             public Stream<T> execute(Collection<T> toUpdate) {
+                return doExecute(toUpdate, false);
+            }
+
+            private Stream<T> doExecute(Collection<T> toUpdate, boolean onlyUpdated) {
                 requireNonNull(toUpdate, "Update collection must be provided");
                 List<T> exclude = new ArrayList<>(toUpdate.size());
                 isMutable = true;
@@ -270,7 +312,13 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
                 Stream<T> stream = SelectQuery.this.execute(mapper);
                 wrapper = new MutableResultSet(rs);
                 Metadata meta = new RSMeta(connection, rs, metaCache);
-                return toUpdate.isEmpty() ? stream : stream.map(row -> jdbcTry(() -> {
+                return toUpdate.isEmpty() ? onlyUpdated ? empty() : stream :
+                        onlyUpdated ? stream.filter(row -> doUpdate(row, exclude, toUpdate, isRemovable, meta).isPresent()) :
+                                stream.map(row -> doUpdate(row, exclude, toUpdate, isRemovable, meta).orElse(row));
+            }
+
+            private Optional<T> doUpdate(T row, Collection<T> exclude, Collection<T> toUpdate, AtomicBoolean isRemovable, Metadata meta) {
+                return ofNullable(jdbcTry(() -> {
                     Iterator<T> it = toUpdate.iterator();
                     while (it.hasNext()) {
                         T updated = it.next();
@@ -298,7 +346,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
                             }
                         }
                     }
-                    return row;
+                    return null;
                 }));
             }
         };
@@ -308,54 +356,75 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     @Override
     public ForUpdate<Map<String, Object>> forUpdate() {
         return new SelectForUpdate<Map<String, Object>>() {
+            private final Map<String, String> columnNamesMappings = new HashMap<>();
+
+            @Override
+            public boolean single(Map<String, Object> item) {
+                return doExecute(singletonList(requireNonNull(item, "Updated item must be provided")), true).count() == 1;
+            }
+
             @Nonnull
             @Override
             public Stream<Map<String, Object>> execute(Collection<Map<String, Object>> toUpdate) {
+                return doExecute(toUpdate, false);
+            }
+
+            private Stream<Map<String, Object>> doExecute(Collection<Map<String, Object>> toUpdate, boolean onlyUpdated) {
                 requireNonNull(toUpdate, "Update collection must be provided");
                 isMutable = true;
                 Stream<Map<String, Object>> stream = SelectQuery.this.execute();
                 Metadata meta = new RSMeta(connection, rs, metaCache);
-                Map<String, Set<Object>> primaryKeys = jdbcTry(() -> meta.getPrimaryKeys().stream()
-                        .collect(toMap(pk -> pk, pk -> toUpdate.stream().map(row -> row.get(pk)).collect(toSet())))
-                );
-                List<String> updatableColumnNames = meta.getColumnNames().stream().filter(col -> !meta.isPrimaryKey(col)).collect(toList());
-                return toUpdate.isEmpty() ? stream : stream.map(row -> jdbcTry(() -> {
-                    Map<String, Object> updated = toUpdate.stream().filter(upd -> {
-                        for (Map.Entry<String, Object> e : upd.entrySet()) {
-                            Set<Object> keys = primaryKeys.get(e.getKey());
-                            if (keys != null && keys.contains(row.get(e.getKey()))) {
-                                Object oldKey = row.get(e.getKey());
-                                return oldKey != null && oldKey.equals(e.getValue());
-                            }
-                        }
-                        return false;
-                    }).findFirst().orElse(emptyMap());
-                    if (!updated.isEmpty()) {
-                        Map<String, Object> newRow = new LinkedHashMap<>(row);
-                        boolean needsUpdate = false;
-                        for (String colName : updatableColumnNames) {
-                            Object newValue = updated.get(colName);
-                            Object oldValue = row.get(colName);
-                            if (!(oldValue == null && newValue == null) && (newValue != null && !newValue.equals(oldValue))) {
-                                rs.updateObject(colName, newValue);
-                                newRow.put(colName, newValue);
-                                needsUpdate = true;
-                            }
-                        }
-                        if (needsUpdate) {
-                            rs.updateRow();
-                            if (updatedHandler != null) {
-                                conveyor.execute(() -> updatedHandler.accept(row, newRow));
-                            }
-                            if (logger != null) {
-                                logger.accept(newRow.toString());
-                            }
-                            return newRow;
-                        }
-                    }
-                    return row;
-                }));
+                return toUpdate.isEmpty() ? onlyUpdated ? empty() : stream : onlyUpdated ? stream.filter(row -> doUpdate(row, toUpdate, meta).isPresent()) : stream.map(row -> doUpdate(row, toUpdate, meta).orElse(row));
             }
+
+            private String getColumnName(String columnName, Metadata meta) {
+                return columnNamesMappings.computeIfAbsent(columnName, name -> meta.getColumnNames().stream().filter(c -> c.equalsIgnoreCase(name)).findFirst().orElse(name));
+            }
+
+            private String getColumnName(String columnName, Map<String, Object> row) {
+                return columnNamesMappings.computeIfAbsent(columnName, name -> row.keySet().stream().filter(c -> c.equalsIgnoreCase(name)).findFirst().orElse(name));
+            }
+
+            private Optional<Map<String, Object>> doUpdate(Map<String, Object> row, Collection<Map<String, Object>> toUpdate, Metadata meta) {
+                return toUpdate.stream()
+                        .filter(upd -> {
+                            boolean accepted = true;
+                            for (Map.Entry<String, Object> e : upd.entrySet()) {
+                                if (meta.isPrimaryKey(e.getKey())) {
+                                    Object oldKey = row.get(getColumnName(e.getKey(), meta));
+                                    accepted &= oldKey != null && oldKey.equals(e.getValue());
+                                }
+                            }
+                            return accepted;
+                        })
+                        .map(updated -> jdbcTry(() -> {
+                            Map<String, Object> newRow = new LinkedHashMap<>(row);
+                            boolean needsUpdate = false;
+                            for (String colName : meta.getColumnNames().stream().filter(col -> !meta.isPrimaryKey(col)).collect(toList())) {
+                                Object newValue = updated.get(getColumnName(colName, updated));
+                                Object oldValue = row.get(colName);
+                                if (!(oldValue == null && newValue == null) && (newValue != null && !newValue.equals(oldValue))) {
+                                    rs.updateObject(colName, newValue);
+                                    newRow.put(colName, newValue);
+                                    needsUpdate = true;
+                                }
+                            }
+                            if (needsUpdate) {
+                                rs.updateRow();
+                                if (updatedHandler != null) {
+                                    conveyor.execute(() -> updatedHandler.accept(row, newRow));
+                                }
+                                if (logger != null) {
+                                    logger.accept(newRow.toString());
+                                }
+                                return newRow;
+                            }
+                            return null;
+                        }))
+                        .filter(Objects::nonNull)
+                        .findFirst();
+            }
+
         };
     }
 

@@ -47,6 +47,14 @@ public interface Select extends Query {
      */
     @ParametersAreNonnullByDefault
     interface ForInsert<T> {
+
+        /**
+         *
+         * @param item
+         * @return
+         */
+        boolean single(T item);
+
         /**
          * Executes this <code>INSERT</code> action which is performed on a {@link ResultSet} object obtained via provided <code>SELECT</code> statement
          *
@@ -125,6 +133,13 @@ public interface Select extends Query {
     interface ForUpdate<T> {
 
         /**
+         *
+         * @param item
+         * @return
+         */
+        boolean single(T item);
+
+        /**
          * Executes this <code>UPDATE</code> action which is performed on a {@link ResultSet} object obtained via provided <code>SELECT</code> statement
          *
          * @param toUpdate a collection of items to update with
@@ -197,6 +212,13 @@ public interface Select extends Query {
      */
     @ParametersAreNonnullByDefault
     interface ForDelete<T> {
+
+        /**
+         *
+         * @param item
+         * @return
+         */
+        boolean single(T item);
 
         /**
          * Executes this <code>DELETE</code> action which is performed on a {@link ResultSet} object obtained via provided <code>SELECT</code> statement
@@ -453,9 +475,8 @@ public interface Select extends Query {
     }
 
     /**
-     *
      * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @param <T> item type
+     * @param <T>    item type
      * @return a {@link Stream} over mapped {@link ResultSet}
      */
     @Nonnull

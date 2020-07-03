@@ -618,6 +618,11 @@ public class DBTestSuite {
     }
 
     @Test
+    public void testSelectForUpdateSingle() throws Exception {
+        assertTrue(db.select("Select * FROM TEST").forUpdate().single(of("name", "namee", "id", 1, null, null)));
+    }
+
+    @Test
     public void testSelectForInsert() throws Exception {
         assertEquals(13, db.select("SELECT * FROM TEST").forInsert().list(Arrays.asList(
                 of("NAME", "nameNew", "NAME2", "WOW", null, null),
