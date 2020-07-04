@@ -42,6 +42,16 @@ public interface Select extends Query {
 
     /**
      * An abstraction for <code>INSERT</code> action being performed on {@link ResultSet} object
+     * <br/>Simple usage example:
+     * <pre>{@code
+     *  DB db = new DB(ds);
+     *  // suppose we have to insert new user name in the corresponding table
+     *  if(db.select("SELECT * FROM USERS").forInsert(rs -> rs.getString("name"), (name, rs) -> rs.updateString("name", name)).single("new_user")) {
+     *      // user successfully inserted - do necessary things to process middleware logic
+     *  } else {
+     *      // reject user and halt imaginary business process logic (e.g. like user registration)
+     *  }
+     * }</pre>
      *
      * @param <T> inserted item type
      */
@@ -49,9 +59,11 @@ public interface Select extends Query {
     interface ForInsert<T> {
 
         /**
+         * Insert a single non-null item
          *
-         * @param item
-         * @return
+         * @param item an item to insert
+         * @return true if the item was successfully inserted, false - otherwise
+         * @throws NullPointerException if item is null
          */
         boolean single(T item);
 
@@ -126,6 +138,16 @@ public interface Select extends Query {
 
     /**
      * An abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
+     * <br/>Simple usage example:
+     * <pre>{@code
+     *  DB db = new DB(ds);
+     *  // suppose we have to update user details in the corresponding table
+     *  if(db.select("SELECT * FROM USERS").forUpdate(rs -> rs.getDate("last_logon_time"), (oldDate, newDate, rs) -> if(newDate.after(oldDate)) rs.updateTimestamp("last_logon_time", newDate)).single(new Date())) {
+     *      // user successfully logged on - do necessary things to process middleware logic
+     *  } else {
+     *      // it seems that user has logged in somewhere in the future...
+     *  }
+     * }</pre>
      *
      * @param <T> updated item type
      */
@@ -133,9 +155,11 @@ public interface Select extends Query {
     interface ForUpdate<T> {
 
         /**
+         * Update a single non-null item
          *
-         * @param item
-         * @return
+         * @param item an item to update
+         * @return true if the item was successfully updated, false - otherwise
+         * @throws NullPointerException if item is null
          */
         boolean single(T item);
 
@@ -177,6 +201,8 @@ public interface Select extends Query {
         }
 
         /**
+         * An item updated event handler (executes in a separate thread)
+         *
          * @param handler a handler to be invoked whenever the item is updated
          * @return an abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
          * @throws NullPointerException if provided handler is null
@@ -214,9 +240,11 @@ public interface Select extends Query {
     interface ForDelete<T> {
 
         /**
+         * Delete a single non-null item
          *
-         * @param item
-         * @return
+         * @param item an item to delete
+         * @return true if the item was successfully deleted, false - otherwise
+         * @throws NullPointerException if item is null
          */
         boolean single(T item);
 
@@ -258,6 +286,8 @@ public interface Select extends Query {
         }
 
         /**
+         * An item deleted event handler (executes in a separate thread)
+         *
          * @param handler a handler to be invoked whenever the item is deleted
          * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
          * @throws NullPointerException if provided handler is null

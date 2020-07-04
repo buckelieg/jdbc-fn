@@ -166,31 +166,27 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
         return new SelectForInsert<T>() {
             @Override
             public boolean single(T item) {
-                return doExecute(singletonList(requireNonNull(item, "Inserted item must be provided")), true).count() == 1;
+                return jdbcTry(() -> doExecute(singletonList(requireNonNull(item, "Inserted item must be provided")), true).count() == 1);
             }
 
             @Nonnull
             @Override
             public Stream<T> execute(Collection<T> toInsert) {
-                return doExecute(toInsert, false);
+                return jdbcTry(() -> doExecute(toInsert, false));
             }
 
-            private Stream<T> doExecute(Collection<T> toInsert, boolean onlyInserted) {
+            private Stream<T> doExecute(Collection<T> toInsert, boolean onlyInserted) throws SQLException {
                 requireNonNull(toInsert, "Insert collection must be provided");
+                if (onlyInserted && toInsert.isEmpty()) return empty();
                 isMutable = true;
-                Stream<T> stream = onlyInserted ? SelectQuery.this.fetchSize(1).maxRows(1).execute(mapper) : SelectQuery.this.execute(mapper);
+                statement = SelectQuery.this.prepareStatement();
+                SelectQuery.this.doExecute();
                 wrapper = new MutableResultSet(rs);
                 Metadata meta = new RSMeta(connection, rs, metaCache);
-                return toInsert.isEmpty() ? onlyInserted ? empty() : stream : jdbcTry(() -> {
-                    rs.moveToInsertRow();
-                    if (onlyInserted) {
-                        return toInsert.stream().filter(row -> doInsert(row, meta)).onClose(SelectQuery.this::close);
-                    } else {
-                        toInsert.forEach(row -> doInsert(row, meta));
-                        rs.moveToCurrentRow();
-                        return stream;
-                    }
-                });
+                rs.moveToInsertRow();
+                List<T> inserted = toInsert.stream().filter(row -> doInsert(row, meta)).collect(toList());
+                rs.close();
+                return onlyInserted ? inserted.stream() : SelectQuery.this.execute(mapper);
             }
 
             private boolean doInsert(T row, Metadata meta) {
@@ -218,10 +214,10 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     public ForInsert<Map<String, Object>> forInsert() {
         return forInsert((row, rs, meta) -> {
             for (String col : row.keySet().stream().filter(Objects::nonNull).collect(toList())) {
-                if (!meta.isPrimaryKey(col) && meta.exists(col)) {
+                if (meta.exists(col) && !meta.isPrimaryKey(col)) {
                     Object value = row.getOrDefault(col, null);
-                    if(value == null && !meta.isNullable(col)) continue;
-                    rs.updateObject(getColumnName(col, row),  value);
+                    if (value == null && !meta.isNullable(col)) continue;
+                    rs.updateObject(getColumnName(col, row), value);
                 }
             }
         });
@@ -321,15 +317,14 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
 
             private Stream<T> doExecute(Collection<T> toUpdate, boolean onlyUpdated) {
                 requireNonNull(toUpdate, "Update collection must be provided");
+                if (onlyUpdated && toUpdate.isEmpty()) return empty();
                 List<T> exclude = new ArrayList<>(toUpdate.size());
                 isMutable = true;
                 AtomicBoolean isRemovable = new AtomicBoolean(true);
                 Stream<T> stream = SelectQuery.this.execute(mapper);
                 wrapper = new MutableResultSet(rs);
                 Metadata meta = new RSMeta(connection, rs, metaCache);
-                return toUpdate.isEmpty() ? onlyUpdated ? empty() : stream :
-                        onlyUpdated ? stream.filter(row -> doUpdate(row, exclude, toUpdate, isRemovable, meta).isPresent()) :
-                                stream.map(row -> doUpdate(row, exclude, toUpdate, isRemovable, meta).orElse(row));
+                return toUpdate.isEmpty() ? stream : onlyUpdated ? stream.filter(row -> doUpdate(row, exclude, toUpdate, isRemovable, meta).isPresent()) : stream.map(row -> doUpdate(row, exclude, toUpdate, isRemovable, meta).orElse(row));
             }
 
             private Optional<T> doUpdate(T row, Collection<T> exclude, Collection<T> toUpdate, AtomicBoolean isRemovable, Metadata meta) {
@@ -347,7 +342,6 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
                                     try {
                                         it.remove();
                                     } catch (UnsupportedOperationException e) {
-                                        e.printStackTrace();
                                         isRemovable.set(false); // no more tries to remove elements from the source collection
                                     }
                                 }
@@ -384,12 +378,11 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
 
             private Stream<Map<String, Object>> doExecute(Collection<Map<String, Object>> toUpdate, boolean onlyUpdated) {
                 requireNonNull(toUpdate, "Update collection must be provided");
+                if (onlyUpdated && toUpdate.isEmpty()) return empty();
                 isMutable = true;
                 Stream<Map<String, Object>> stream = SelectQuery.this.execute();
                 Metadata meta = new RSMeta(connection, rs, metaCache);
-                return toUpdate.isEmpty() ? onlyUpdated ? empty() : stream :
-                        onlyUpdated ? stream.filter(row -> doUpdate(row, toUpdate, meta).isPresent()) :
-                                stream.map(row -> doUpdate(row, toUpdate, meta).orElse(row));
+                return toUpdate.isEmpty() ? stream : onlyUpdated ? stream.filter(row -> doUpdate(row, toUpdate, meta).isPresent()) : stream.map(row -> doUpdate(row, toUpdate, meta).orElse(row));
             }
 
             private Optional<Map<String, Object>> doUpdate(Map<String, Object> row, Collection<Map<String, Object>> toUpdate, Metadata meta) {

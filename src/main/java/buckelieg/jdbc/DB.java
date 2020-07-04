@@ -63,7 +63,7 @@ public final class DB implements AutoCloseable {
     private final TrySupplier<Connection, SQLException> connectionSupplier;
     private ExecutorService conveyor;
     private boolean shutdownConveyor = true;
-    private ConcurrentMap<String, RSMeta.Column> metaCache;
+    private final ConcurrentMap<String, RSMeta.Column> metaCache;
 
     DB(Connection connection) {
         this(() -> connection);

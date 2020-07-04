@@ -600,7 +600,8 @@ public class DBTestSuite {
     public void testSelectForUpdate() throws Exception {
         List<String> oldNames = db.select("SELECT name FROM TEST").list(rs -> rs.getString("name"));
         List<String> newNames = db.select("SELECT * FROM TEST")
-                .forUpdate(rs -> rs.getString(2), (name2, rs) -> {})
+                .forUpdate(rs -> rs.getString(2), (name2, rs) -> {
+                })
                 .onUpdated((nameOld, nameNew) -> System.out.println(String.format("%s -> %s", nameOld, nameNew)))
                 .list(Arrays.asList("name222", "name3333"));
         assertEquals(oldNames, newNames);
@@ -620,6 +621,11 @@ public class DBTestSuite {
     @Test
     public void testSelectForUpdateSingle() throws Exception {
         assertTrue(db.select("Select * FROM TEST").forUpdate().single(of("name", "namee", "id", 1, null, null)));
+        System.out.println(db.select("SELECT * FROM TEST").forUpdate(
+                rs -> rs.getString("name"),
+                (oldName, newName, rs) -> {
+                    if (oldName.equalsIgnoreCase("name_2")) rs.updateString("name", newName);
+                }).list(Arrays.asList("updatedname1")));
     }
 
     @Test
@@ -630,6 +636,10 @@ public class DBTestSuite {
                 of("NAmE", "name_3", null, null, "key2", null),
                 of("NAmE", null, null, null, "key2", null)
         )).size());
+        System.out.println(db.select("SELECT * FROM TEST").list());
+        if (db.select("SELECT * FROM TEST").forInsert(rs -> rs.getString("name"), (name, rs) -> rs.updateString("name", name)).single("new_name21")) {
+            assertTrue(db.select("SELECT * FROM TEST WHERE NAME=?", "new_name21").single().isPresent());
+        }
         System.out.println(db.select("SELECT * FROM TEST").list());
     }
 

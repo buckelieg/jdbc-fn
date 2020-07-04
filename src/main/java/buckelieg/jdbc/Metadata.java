@@ -31,6 +31,12 @@ import static java.util.stream.Collectors.toList;
 @ParametersAreNonnullByDefault
 public interface Metadata {
 
+    /**
+     * Test if provided <code>columnName</code> exists in this {@link ResultSet} object
+     *
+     * @param columnName a name of the column to test existence with
+     * @return true if the column with provided name exists, false - otherwise
+     */
     default boolean exists(String columnName) {
         return getColumnNames().stream().anyMatch(col -> col.equalsIgnoreCase(columnName));
     }
