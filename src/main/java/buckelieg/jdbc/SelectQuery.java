@@ -119,6 +119,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     private int fetchSize;
     private int maxRowsInt = -1;
     private long maxRowsLong = -1L;
+    private final Map<String, String> columnNamesMappings = new HashMap<>();
 
     SelectQuery(Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, Connection connection, String query, Object... params) {
         super(connection, query, params);
@@ -214,6 +215,20 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
 
     @Nonnull
     @Override
+    public ForInsert<Map<String, Object>> forInsert() {
+        return forInsert((row, rs, meta) -> {
+            for (String col : row.keySet().stream().filter(Objects::nonNull).collect(toList())) {
+                if (!meta.isPrimaryKey(col) && meta.exists(col)) {
+                    Object value = row.getOrDefault(col, null);
+                    if(value == null && !meta.isNullable(col)) continue;
+                    rs.updateObject(getColumnName(col, row),  value);
+                }
+            }
+        });
+    }
+
+    @Nonnull
+    @Override
     public <T> ForDelete<T> forDelete(TryFunction<ResultSet, T, SQLException> mapper, TryFunction<T, ?, SQLException> keyExtractor) {
         requireNonNull(keyExtractor, "Key extractor function must be provided");
         return new SelectForDelete<T>() {
@@ -248,7 +263,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
                 isMutable = true;
                 Stream<Map<String, Object>> stream = SelectQuery.this.execute();
                 RSMeta meta = new RSMeta(connection, rs, metaCache);
-                return doDelete(stream, logger, deletedHandler, toDelete, row -> meta.getPrimaryKeys().stream().map(pk -> new SimpleImmutableEntry<>(pk, row.get(pk))).collect(toMap(Map.Entry::getKey, Map.Entry::getValue)), false);
+                return doDelete(stream, logger, deletedHandler, toDelete, row -> row.keySet().stream().filter(meta::isPrimaryKey).map(pk -> new SimpleImmutableEntry<>(pk.toLowerCase(), row.get(pk))).collect(toMap(Map.Entry::getKey, Map.Entry::getValue)), false);
             }
         };
     }
@@ -356,8 +371,6 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     @Override
     public ForUpdate<Map<String, Object>> forUpdate() {
         return new SelectForUpdate<Map<String, Object>>() {
-            private final Map<String, String> columnNamesMappings = new HashMap<>();
-
             @Override
             public boolean single(Map<String, Object> item) {
                 return doExecute(singletonList(requireNonNull(item, "Updated item must be provided")), true).count() == 1;
@@ -374,15 +387,9 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
                 isMutable = true;
                 Stream<Map<String, Object>> stream = SelectQuery.this.execute();
                 Metadata meta = new RSMeta(connection, rs, metaCache);
-                return toUpdate.isEmpty() ? onlyUpdated ? empty() : stream : onlyUpdated ? stream.filter(row -> doUpdate(row, toUpdate, meta).isPresent()) : stream.map(row -> doUpdate(row, toUpdate, meta).orElse(row));
-            }
-
-            private String getColumnName(String columnName, Metadata meta) {
-                return columnNamesMappings.computeIfAbsent(columnName, name -> meta.getColumnNames().stream().filter(c -> c.equalsIgnoreCase(name)).findFirst().orElse(name));
-            }
-
-            private String getColumnName(String columnName, Map<String, Object> row) {
-                return columnNamesMappings.computeIfAbsent(columnName, name -> row.keySet().stream().filter(c -> c.equalsIgnoreCase(name)).findFirst().orElse(name));
+                return toUpdate.isEmpty() ? onlyUpdated ? empty() : stream :
+                        onlyUpdated ? stream.filter(row -> doUpdate(row, toUpdate, meta).isPresent()) :
+                                stream.map(row -> doUpdate(row, toUpdate, meta).orElse(row));
             }
 
             private Optional<Map<String, Object>> doUpdate(Map<String, Object> row, Collection<Map<String, Object>> toUpdate, Metadata meta) {
@@ -556,6 +563,14 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
 
     protected Statement prepareStatement() throws SQLException {
         return isPrepared ? setStatementParameters(connection.prepareStatement(query, ResultSet.TYPE_FORWARD_ONLY, isMutable ? ResultSet.CONCUR_UPDATABLE : ResultSet.CONCUR_READ_ONLY), params) : connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, isMutable ? ResultSet.CONCUR_UPDATABLE : ResultSet.CONCUR_READ_ONLY);
+    }
+
+    private String getColumnName(String columnName, Metadata meta) {
+        return columnNamesMappings.computeIfAbsent(columnName, name -> meta.getColumnNames().stream().filter(c -> c.equalsIgnoreCase(name)).findFirst().orElse(name));
+    }
+
+    private String getColumnName(String columnName, Map<String, Object> row) {
+        return columnNamesMappings.computeIfAbsent(columnName, name -> row.keySet().stream().filter(Objects::nonNull).filter(c -> c.equalsIgnoreCase(name)).findFirst().orElse(name));
     }
 
 }

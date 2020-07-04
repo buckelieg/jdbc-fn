@@ -120,6 +120,13 @@ abstract class AbstractQuery<S extends Statement> implements Query {
         } catch (SQLException e) {
             close();
             throw newSQLRuntimeException(e);
+        } catch (Exception e) {
+            if(!e.getClass().equals(SQLRuntimeException.class)) {
+                close();
+                throw new RuntimeException(e);
+            } else {
+                throw e;
+            }
         }
         return result;
     }
@@ -135,6 +142,13 @@ abstract class AbstractQuery<S extends Statement> implements Query {
         } catch (SQLException e) {
             close();
             throw newSQLRuntimeException(e);
+        } catch (Exception e) {
+            if(!e.getClass().equals(SQLRuntimeException.class)) {
+                close();
+                throw new RuntimeException(e);
+            } else {
+                throw e;
+            }
         }
     }
 

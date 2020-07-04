@@ -224,7 +224,7 @@ public final class Utils {
             }
             messages.append(message);
         }
-        return new SQLRuntimeException(messages.toString().trim(), false);
+        return new SQLRuntimeException(messages.toString().trim(), true);
     }
 
     @SuppressWarnings("SynchronizationOnLocalVariableOrMethodParameter")

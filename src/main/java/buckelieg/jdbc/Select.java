@@ -392,15 +392,7 @@ public interface Select extends Query {
      * @return an abstraction for <code>INSERT</code> action being performed on {@link ResultSet} object
      */
     @Nonnull
-    default ForInsert<Map<String, Object>> forInsert() {
-        return forInsert((row, rs, meta) -> {
-            for (String columnName : meta.getColumnNames()) {
-                if (!meta.isPrimaryKey(columnName)) {
-                    rs.updateObject(columnName, meta.isNullable(columnName) ? row.getOrDefault(columnName, null) : row.get(columnName));
-                }
-            }
-        });
-    }
+    ForInsert<Map<String, Object>> forInsert();
 
     /**
      * @param mapper       a {@link ResultSet} mapper function which is not required to handle {@link SQLException}

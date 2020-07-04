@@ -31,6 +31,10 @@ import static java.util.stream.Collectors.toList;
 @ParametersAreNonnullByDefault
 public interface Metadata {
 
+    default boolean exists(String columnName) {
+        return getColumnNames().stream().anyMatch(col -> col.equalsIgnoreCase(columnName));
+    }
+
     /**
      * Retrieves column names that are <code>primary keys</code>
      *

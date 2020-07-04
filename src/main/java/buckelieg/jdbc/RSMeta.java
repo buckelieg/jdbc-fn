@@ -28,7 +28,6 @@ import java.util.function.Consumer;
 import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static buckelieg.jdbc.Utils.rsStream;
 import static java.lang.String.format;
-import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 import static java.util.stream.Collectors.toList;
 
@@ -127,6 +126,11 @@ final class RSMeta implements Metadata {
 
     SQLType getSQLType(Column c) {
         return getSQLType(c.ownTable, c.name);
+    }
+
+    @Override
+    public boolean exists(String columnName) {
+        return getColumn(columnName).isPresent();
     }
 
     @Nonnull
@@ -299,7 +303,6 @@ final class RSMeta implements Metadata {
     }
 
     private Optional<Column> getColumn(String columnName) {
-        requireNonNull(columnName, "Column name must be provided");
         return getColumns().stream().filter(c -> c.name.equalsIgnoreCase(columnName)).findFirst();
     }
 

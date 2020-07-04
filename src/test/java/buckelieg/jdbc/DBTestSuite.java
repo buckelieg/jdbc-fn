@@ -608,9 +608,9 @@ public class DBTestSuite {
                 .forUpdate()
                 .list(
                         Arrays.asList(
-                                of("ID", 1, "NAME", "nameNew", "NAME2", "WOW"),
-                                of("ID", 3, "NAME", "name______22", null, null),
-                                of("ID", 2, "NAME", "name_3", null, null)
+                                of("id", 1, "NAME", "nameNew", "NAME2", "WOW"),
+                                of("Id", 3, "NAME", "name______22", null, null),
+                                of("iD", 2, "NAME", "name_3", null, null)
                         )
                 );
         List<Map<String, Object>> selected = db.select("SELECT * FROM TEST").list();
@@ -626,8 +626,9 @@ public class DBTestSuite {
     public void testSelectForInsert() throws Exception {
         assertEquals(13, db.select("SELECT * FROM TEST").forInsert().list(Arrays.asList(
                 of("NAME", "nameNew", "NAME2", "WOW", null, null),
-                of("NAME", "name______22", null, null, null, null),
-                of("NAME", "name_3", null, null, null, null)
+                of("name", "name______22", null, null, null, null),
+                of("NAmE", "name_3", null, null, "key2", null),
+                of("NAmE", null, null, null, "key2", null)
         )).size());
         System.out.println(db.select("SELECT * FROM TEST").list());
     }
@@ -640,9 +641,9 @@ public class DBTestSuite {
                 .verbose(row -> System.out.println(currentThread().getName() + " -> " + row))
                 .list(
                         Arrays.asList(
-                                of("ID", 1, "NAME", "nameNew", "NAME2", "WOW"),
-                                of("ID", 3, "NAME", "name______22", null, null),
-                                of("ID", 2, "NAME", "name_3", null, null)
+                                of("Id", 1, "NAME", "nameNew", "NAME2", "WOW"),
+                                of("iD", 3, "NAME", "name______22", null, null),
+                                of("id", 2, "NAME", "name_3", null, null)
                         )).size()
         );
         System.out.println(db.select("SELECT * FROM TEST").list());
