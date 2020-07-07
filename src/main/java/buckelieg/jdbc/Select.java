@@ -19,6 +19,7 @@ import buckelieg.jdbc.fn.*;
 
 import javax.annotation.Nonnull;
 import javax.annotation.ParametersAreNonnullByDefault;
+import javax.annotation.concurrent.NotThreadSafe;
 import java.io.PrintStream;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -37,6 +38,7 @@ import static java.util.stream.Collectors.toList;
  * An abstraction for SELECT statement
  */
 @SuppressWarnings("unchecked")
+@NotThreadSafe
 @ParametersAreNonnullByDefault
 public interface Select extends Query {
 
@@ -55,6 +57,7 @@ public interface Select extends Query {
      *
      * @param <T> inserted item type
      */
+    @NotThreadSafe
     @ParametersAreNonnullByDefault
     interface ForInsert<T> {
 
@@ -151,6 +154,7 @@ public interface Select extends Query {
      *
      * @param <T> updated item type
      */
+    @NotThreadSafe
     @ParametersAreNonnullByDefault
     interface ForUpdate<T> {
 
@@ -236,6 +240,7 @@ public interface Select extends Query {
      *
      * @param <T> deleted item type
      */
+    @NotThreadSafe
     @ParametersAreNonnullByDefault
     interface ForDelete<T> {
 
@@ -426,19 +431,39 @@ public interface Select extends Query {
 
     /**
      * @param mapper       a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @param keyExtractor
+     * @param keyExtractor a function that obtains <code>PRIMARY KEY</code> from provided item
      * @param <T>          item type
      * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
      */
     @Nonnull
-    <T> ForDelete<T> forDelete(TryFunction<ResultSet, T, SQLException> mapper, TryFunction<T, ?, SQLException> keyExtractor);
+    default <T> ForDelete<T> forDelete(TryFunction<ResultSet, T, SQLException> mapper, TryFunction<T, ?, SQLException> keyExtractor) {
+        return forDelete(mapper, (row, meta) -> keyExtractor.apply(row));
+    }
 
     /**
-     * @param keyExtractor
+     * @param mapper       a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
+     * @param keyExtractor a function that obtains <code>PRIMARY KEY</code> from provided item
+     * @param <T>          item type
+     * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
+     */
+    @Nonnull
+    <T> ForDelete<T> forDelete(TryFunction<ResultSet, T, SQLException> mapper, TryBiFunction<T, Metadata, ?, SQLException> keyExtractor);
+
+    /**
+     * @param keyExtractor a function that obtains <code>PRIMARY KEY</code> from provided item
      * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
      */
     @Nonnull
     default ForDelete<Map<String, Object>> forDelete(TryFunction<Map<String, Object>, ?, SQLException> keyExtractor) {
+        return forDelete((row, meta) -> keyExtractor.apply(row));
+    }
+
+    /**
+     * @param keyExtractor a function that obtains <code>PRIMARY KEY</code> from provided item
+     * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
+     */
+    @Nonnull
+    default ForDelete<Map<String, Object>> forDelete(TryBiFunction<Map<String, Object>, Metadata, ?, SQLException> keyExtractor) {
         return forDelete(new DefaultMapper(), keyExtractor);
     }
 

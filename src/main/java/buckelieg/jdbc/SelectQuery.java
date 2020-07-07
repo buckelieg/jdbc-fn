@@ -90,6 +90,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     }
 
     abstract static class SelectForDelete<T> implements Select.ForDelete<T> {
+        static TryBiFunction<Map<String, Object>, Metadata, Map<String, Object>, SQLException> defaultKeyExtractor = (row, meta) -> row.keySet().stream().filter(meta::isPrimaryKey).map(pk -> new SimpleImmutableEntry<>(pk.toLowerCase(), row.get(pk))).collect(toMap(Map.Entry::getKey, Map.Entry::getValue));
         protected Consumer<T> deletedHandler;
         protected Consumer<String> logger;
 
@@ -113,7 +114,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     protected int currentResultSetNumber = 1;
     ResultSet rs;
     ResultSet wrapper;
-    private boolean isMutable = false;
+    private boolean isMutable;
     private boolean hasNext;
     private boolean hasMoved;
     private int fetchSize;
@@ -225,12 +226,14 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
 
     @Nonnull
     @Override
-    public <T> ForDelete<T> forDelete(TryFunction<ResultSet, T, SQLException> mapper, TryFunction<T, ?, SQLException> keyExtractor) {
+    public <T> ForDelete<T> forDelete(TryFunction<ResultSet, T, SQLException> mapper, TryBiFunction<T, Metadata, ?, SQLException> keyExtractor) {
         requireNonNull(keyExtractor, "Key extractor function must be provided");
         return new SelectForDelete<T>() {
             @Override
             public boolean single(T item) {
-                return doDelete(SelectQuery.this.execute(mapper), logger, deletedHandler, singletonList(requireNonNull(item, "Deleted item must be provided")), keyExtractor, true).count() == 1;
+                requireNonNull(item, "Deleted item must be provided");
+                isMutable = true;
+                return doDelete(SelectQuery.this.execute(mapper), logger, deletedHandler, singletonList(item), keyExtractor, true).count() == 1;
             }
 
             @Nonnull
@@ -249,7 +252,9 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
         return new SelectForDelete<Map<String, Object>>() {
             @Override
             public boolean single(Map<String, Object> item) {
-                return execute(singletonList(requireNonNull(item, "Deleted item must be provided"))).count() == 1;
+                requireNonNull(item, "Deleted item must be provided");
+                isMutable = true;
+                return doDelete(SelectQuery.this.execute(), logger, deletedHandler, singletonList(item), defaultKeyExtractor, true).count() == 1;
             }
 
             @Nonnull
@@ -257,23 +262,26 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
             public Stream<Map<String, Object>> execute(Collection<Map<String, Object>> toDelete) {
                 requireNonNull(toDelete, "Delete collection must be provided");
                 isMutable = true;
-                Stream<Map<String, Object>> stream = SelectQuery.this.execute();
-                RSMeta meta = new RSMeta(connection, rs, metaCache);
-                return doDelete(stream, logger, deletedHandler, toDelete, row -> row.keySet().stream().filter(meta::isPrimaryKey).map(pk -> new SimpleImmutableEntry<>(pk.toLowerCase(), row.get(pk))).collect(toMap(Map.Entry::getKey, Map.Entry::getValue)), false);
+                return doDelete(SelectQuery.this.execute(), logger, deletedHandler, toDelete, defaultKeyExtractor, false);
             }
         };
     }
 
-    private <T> Stream<T> doDelete(Stream<T> stream, @Nullable Consumer<String> logger, @Nullable Consumer<T> deletedHandler, Collection<T> toDelete, TryFunction<T, ?, SQLException> keyExtractor, boolean deletedOnly) {
+    private <T> Stream<T> doDelete(Stream<T> stream, @Nullable Consumer<String> logger, @Nullable Consumer<T> deletedHandler, Collection<T> toDelete, TryBiFunction<T, Metadata, ?, SQLException> keyExtractor, boolean deletedOnly) {
+        if (toDelete.isEmpty() && deletedOnly) {
+            stream.close();
+            return empty();
+        }
         List<T> excluded = new ArrayList<>(toDelete.size());
         AtomicBoolean isRemovable = new AtomicBoolean(true);
-        return toDelete.isEmpty() ? deletedOnly ? empty() : stream : stream.filter(row -> jdbcTry(() -> {
+        Metadata meta = new RSMeta(connection, rs, metaCache);
+        return toDelete.isEmpty() ? stream : stream.filter(row -> jdbcTry(() -> {
             Iterator<T> it = toDelete.iterator();
             while (it.hasNext()) {
                 T deleted = it.next();
                 if (!excluded.contains(deleted)) {
-                    Object pkOld = keyExtractor.apply(row);
-                    Object pkNew = keyExtractor.apply(deleted);
+                    Object pkOld = keyExtractor.apply(row, meta);
+                    Object pkNew = keyExtractor.apply(deleted, meta);
                     if (pkOld.equals(pkNew)) {
                         excluded.add(deleted);
                         rs.deleteRow();
@@ -432,6 +440,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     @Override
     public final <T> Stream<T> execute(TryBiFunction<ResultSet, Integer, T, SQLException> mapper) {
         requireNonNull(mapper, "Mapper must be provided");
+        if (rs != null && hasMoved && !hasNext) return empty();
         return StreamSupport.stream(jdbcTry(() -> {
             connection.setAutoCommit(false);
             statement = prepareStatement();

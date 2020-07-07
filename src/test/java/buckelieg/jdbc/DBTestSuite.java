@@ -621,11 +621,11 @@ public class DBTestSuite {
     @Test
     public void testSelectForUpdateSingle() throws Exception {
         assertTrue(db.select("Select * FROM TEST").forUpdate().single(of("name", "namee", "id", 1, null, null)));
-        System.out.println(db.select("SELECT * FROM TEST").forUpdate(
+        assertTrue(db.select("SELECT * FROM TEST").forUpdate(
                 rs -> rs.getString("name"),
                 (oldName, newName, rs) -> {
                     if (oldName.equalsIgnoreCase("name_2")) rs.updateString("name", newName);
-                }).list(Arrays.asList("updatedname1")));
+                }).list(Arrays.asList("updatedname1")).get(1).equals("updatedname1"));
     }
 
     @Test
@@ -667,6 +667,13 @@ public class DBTestSuite {
             map.put(key3, value3);
         }
         return map;
+    }
+
+    @Test
+    public void testSelectNotReUseable() throws Exception {
+        Select select = db.select("SELECT * FROM TEST");
+        assertEquals(10, select.list().size());
+        assertEquals(0, select.list().size());
     }
 
 }
