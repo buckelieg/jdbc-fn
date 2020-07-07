@@ -483,9 +483,22 @@ public interface Select extends Query {
      */
     @Nonnull
     default <T> Optional<T> single(TryFunction<ResultSet, T, SQLException> mapper) {
+        return single((rs, meta) -> mapper.apply(rs));
+    }
+
+    /**
+     * In cases when single result of SELECT statement is expected
+     * <br/>Like <code>SELECT COUNT(*) FROM TABLE_NAME</code> etc.
+     *
+     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
+     * @throws NullPointerException if mapper is null
+     * @see #execute(TryFunction)
+     */
+    @Nonnull
+    default <T> Optional<T> single(TryBiFunction<ResultSet, Metadata, T, SQLException> mapper) {
         T result;
         try {
-            result = fetchSize(1).maxRows(1).list(mapper).iterator().next();
+            result = fetchSize(1).maxRows(1).list((rs, i, meta) -> mapper.apply(rs, meta)).iterator().next();
         } catch (NoSuchElementException e) {
             result = null;
         } catch (Exception e) {
@@ -493,6 +506,8 @@ public interface Select extends Query {
         }
         return ofNullable(result);
     }
+
+
 
     /**
      * Executes SELECT statement for SINGLE result with default mapper applied
