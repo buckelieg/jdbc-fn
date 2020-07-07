@@ -24,6 +24,7 @@
  * @see buckelieg.jdbc.fn.TryQuadConsumer
  * @see buckelieg.jdbc.fn.TryFunction
  * @see buckelieg.jdbc.fn.TryBiFunction
+ * @see buckelieg.jdbc.fn.TryTriFunction
  * @see buckelieg.jdbc.fn.TryPredicate
  * @see buckelieg.jdbc.fn.TryBiPredicate
  * @see buckelieg.jdbc.fn.TrySupplier

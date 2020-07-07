@@ -15,10 +15,7 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryBiFunction;
-import buckelieg.jdbc.fn.TryFunction;
-import buckelieg.jdbc.fn.TryQuadConsumer;
-import buckelieg.jdbc.fn.TryTriConsumer;
+import buckelieg.jdbc.fn.*;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -31,6 +28,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -121,6 +119,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     private int maxRowsInt = -1;
     private long maxRowsLong = -1L;
     private final Map<String, String> columnNamesMappings = new HashMap<>();
+    protected final AtomicReference<Metadata> meta = new AtomicReference<>();
 
     SelectQuery(Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, Connection connection, String query, Object... params) {
         super(connection, query, params);
@@ -438,9 +437,10 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
 
     @Nonnull
     @Override
-    public final <T> Stream<T> execute(TryBiFunction<ResultSet, Integer, T, SQLException> mapper) {
+    public final <T> Stream<T> execute(TryTriFunction<ResultSet, Integer, Metadata, T, SQLException> mapper) {
         requireNonNull(mapper, "Mapper must be provided");
         if (rs != null && hasMoved && !hasNext) return empty();
+
         return StreamSupport.stream(jdbcTry(() -> {
             connection.setAutoCommit(false);
             statement = prepareStatement();
@@ -457,9 +457,10 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
             doExecute();
             if (rs != null) {
                 wrapper = new ImmutableResultSet(rs);
+                meta.set(new RSMeta(connection, rs, metaCache));
             }
             return this;
-        }), false).map(rs -> jdbcTry(() -> mapper.apply(wrapper, currentResultSetNumber))).onClose(this::close);
+        }), false).map(rs -> jdbcTry(() -> mapper.apply(wrapper, currentResultSetNumber, meta.get()))).onClose(this::close);
     }
 
     protected void doExecute() throws SQLException {

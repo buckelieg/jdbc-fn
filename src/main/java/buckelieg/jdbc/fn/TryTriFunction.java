@@ -1,0 +1,62 @@
+package buckelieg.jdbc.fn;
+
+import java.util.Objects;
+
+import static java.util.Objects.requireNonNull;
+
+/**
+ * Three-argument function with returned result that might throw an exception
+ * <br/>There is no requirement that a new or distinct result be returned each time the function is invoked
+ * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #apply(Object, Object, Object)}
+ *
+ * @param <I1> first input argument type
+ * @param <I2> second input argument type
+ * @param <I3> third input argument type
+ * @param <O>  result type
+ * @param <E>  an exception type thrown
+ */
+@FunctionalInterface
+public interface TryTriFunction<I1, I2, I3, O, E extends Throwable> {
+
+    /**
+     * Represents some three-argument function which might throw an Exception
+     *
+     * @param input1 first argument
+     * @param input2 second argument
+     * @param input3 third argument
+     * @return output
+     * @throws E an exception
+     */
+    O apply(I1 input1, I2 input2, I3 input3) throws E;
+
+    /**
+     * Returns a composed function that first applies this function to
+     * its input, and then applies the {@code after} function to the result.
+     * If evaluation of either function throws an exception, it is relayed to
+     * the caller of the composed function.
+     *
+     * @param <R>   the type of output of the {@code after} function, and of the
+     *              composed function
+     * @param after the function to apply after this function is applied
+     * @return a composed function that first applies this function and then
+     * applies the {@code after} function
+     * @throws E                    an exception
+     * @throws NullPointerException if after is null
+     */
+    default <R> TryTriFunction<I1, I2, I3, R, E> andThen(TryFunction<? super O, ? extends R, E> after) throws E {
+        Objects.requireNonNull(after);
+        return (I1 input1, I2 input2, I3 input3) -> after.apply(apply(input1, input2, input3));
+    }
+
+    /**
+     * Returns reference of lambda expression
+     *
+     * @param tryTriFunction a function
+     * @return lambda as {@link TryTriFunction} reference
+     * @throws NullPointerException if tryTriFunction is null
+     */
+    static <I1, I2, I3, O, E extends Throwable> TryTriFunction<I1, I2, I3, O, E> of(TryTriFunction<I1, I2, I3, O, E> tryTriFunction) {
+        return requireNonNull(tryTriFunction);
+    }
+
+}

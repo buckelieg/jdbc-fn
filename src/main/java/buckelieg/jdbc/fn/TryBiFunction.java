@@ -33,17 +33,6 @@ import static java.util.Objects.requireNonNull;
 public interface TryBiFunction<I1, I2, O, E extends Throwable> {
 
     /**
-     * Returns reference of lambda expression
-     *
-     * @param tryBiFunction a function
-     * @return lambda as {@link TryBiFunction} reference
-     * @throws NullPointerException if tryBiFunction is null
-     */
-    static <I1, I2, O, E extends Throwable> TryBiFunction<I1, I2, O, E> of(TryBiFunction<I1, I2, O, E> tryBiFunction) {
-        return requireNonNull(tryBiFunction);
-    }
-
-    /**
      * Represents some two-argument function which might throw an Exception
      *
      * @param input1 first argument
@@ -52,7 +41,6 @@ public interface TryBiFunction<I1, I2, O, E extends Throwable> {
      * @throws E an exception
      */
     O apply(I1 input1, I2 input2) throws E;
-
 
     /**
      * Returns a composed function that first applies this function to
@@ -71,6 +59,17 @@ public interface TryBiFunction<I1, I2, O, E extends Throwable> {
     default <R> TryBiFunction<I1, I2, R, E> andThen(TryFunction<? super O, ? extends R, E> after) throws E {
         Objects.requireNonNull(after);
         return (I1 input1, I2 input2) -> after.apply(apply(input1, input2));
+    }
+
+    /**
+     * Returns reference of lambda expression
+     *
+     * @param tryBiFunction a function
+     * @return lambda as {@link TryBiFunction} reference
+     * @throws NullPointerException if tryBiFunction is null
+     */
+    static <I1, I2, O, E extends Throwable> TryBiFunction<I1, I2, O, E> of(TryBiFunction<I1, I2, O, E> tryBiFunction) {
+        return requireNonNull(tryBiFunction);
     }
 
 }

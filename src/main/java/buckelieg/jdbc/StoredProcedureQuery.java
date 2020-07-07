@@ -92,6 +92,7 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
                     rs = statement.getResultSet();
                     currentResultSetNumber++;
                     wrapper = new ImmutableResultSet(rs);
+                    meta.set(new RSMeta(connection, rs, metaCache));
                     return super.doHasNext();
                 }
                 try {

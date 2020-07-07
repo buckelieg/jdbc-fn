@@ -527,7 +527,17 @@ public interface Select extends Query {
      * @return a {@link Stream} over mapped {@link ResultSet}
      */
     @Nonnull
-    <T> Stream<T> execute(TryBiFunction<ResultSet, Integer, T, SQLException> mapper);
+    <T> Stream<T> execute(TryTriFunction<ResultSet, Integer, Metadata, T, SQLException> mapper);
+
+    /**
+     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
+     * @param <T>    item type
+     * @return a {@link Stream} over mapped {@link ResultSet}
+     */
+    @Nonnull
+    default <T> Stream<T> execute(TryBiFunction<ResultSet, Integer, T, SQLException> mapper) {
+        return execute((rs, i, meta) -> mapper.apply(rs, i));
+    }
 
     /**
      * Executes this SELECT statement returning a <code>Stream</code> of mapped values over <code>ResultSet</code> object
@@ -584,6 +594,18 @@ public interface Select extends Query {
         return execute();
     }
 
+    /**
+     * Shorthand for stream mapping to list
+     *
+     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
+     * @return a {@link List} over mapped {@link ResultSet}
+     * @see Stream#collect(Collector)
+     * @see java.util.stream.Collectors#toList
+     */
+    @Nonnull
+    default <T> List<T> list(TryTriFunction<ResultSet, Integer, Metadata, T, SQLException> mapper) {
+        return execute(mapper).collect(toList());
+    }
     /**
      * Shorthand for stream mapping to list
      *
