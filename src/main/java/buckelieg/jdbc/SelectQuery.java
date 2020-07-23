@@ -34,6 +34,7 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
+import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static buckelieg.jdbc.Utils.setStatementParameters;
 import static java.lang.Math.max;
 import static java.util.Collections.singletonList;
@@ -560,8 +561,13 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
 
     @Override
     public void close() {
-        jdbcTry(() -> connection.setAutoCommit(autoCommit));
-        super.close();
+        try {
+            connection.setAutoCommit(autoCommit);
+        } catch (SQLException e) {
+            throw newSQLRuntimeException(e);
+        } finally {
+            super.close();
+        }
     }
 
     protected Statement prepareStatement() throws SQLException {

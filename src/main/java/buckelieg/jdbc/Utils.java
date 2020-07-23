@@ -248,7 +248,7 @@ public final class Utils {
                 result = action.apply(conn);
                 conn.commit();
                 return result;
-            } catch (SQLException e) {
+            } catch (Exception e) {
                 conn.rollback(savepoint);
                 conn.releaseSavepoint(savepoint);
                 throw e;
