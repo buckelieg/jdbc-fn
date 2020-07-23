@@ -23,6 +23,7 @@ import javax.annotation.Nonnull;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -33,6 +34,7 @@ import static java.util.Objects.requireNonNull;
 @SuppressWarnings("unchecked")
 abstract class AbstractQuery<S extends Statement> implements Query {
 
+    protected final Executor conveyor;
     protected S statement;
     protected final String query;
     private final String sqlString;
@@ -48,8 +50,9 @@ abstract class AbstractQuery<S extends Statement> implements Query {
     protected boolean escapeProcessing;
     protected final Object[] params;
 
-    AbstractQuery(Connection connection, String query, Object... params) {
+    AbstractQuery(Executor conveyor, Connection connection, String query, Object... params) {
         try {
+            this.conveyor = conveyor;
             this.query = query;
             this.connection = connection;
             this.params = params;
@@ -104,7 +107,8 @@ abstract class AbstractQuery<S extends Statement> implements Query {
     }
 
     final <Q extends Query> Q log(Consumer<String> printer) {
-        requireNonNull(printer, "Printer must be provided").accept(sqlString);
+        requireNonNull(printer, "Printer must be provided");
+        conveyor.execute(() -> printer.accept(sqlString));
         return (Q) this;
     }
 

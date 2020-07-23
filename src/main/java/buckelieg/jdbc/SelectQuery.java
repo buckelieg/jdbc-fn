@@ -108,7 +108,6 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
         }
     }
 
-    protected final Executor conveyor;
     protected final ConcurrentMap<String, RSMeta.Column> metaCache;
     protected int currentResultSetNumber = 1;
     ResultSet rs;
@@ -123,8 +122,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     protected final AtomicReference<Metadata> meta = new AtomicReference<>();
 
     SelectQuery(Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, Connection connection, String query, Object... params) {
-        super(connection, query, params);
-        this.conveyor = conveyor;
+        super(conveyor, connection, query, params);
         this.metaCache = metaCache;
     }
 

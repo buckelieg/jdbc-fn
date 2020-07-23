@@ -24,6 +24,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -50,8 +51,8 @@ final class UpdateQuery extends AbstractQuery<Statement> implements Update {
     private String[] colNames = null;
     private boolean useGeneratedKeys = false;
 
-    UpdateQuery(Connection connection, String query, Object[]... batch) {
-        super(connection, query, (Object) batch);
+    UpdateQuery(Executor conveyor, Connection connection, String query, Object[]... batch) {
+        super(conveyor, connection, query, (Object) batch);
         this.batch = batch;
     }
 

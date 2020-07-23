@@ -344,7 +344,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid DML statement", query));
         }
-        return new UpdateQuery(getConnection(connectionSupplier), checkAnonymous(checkSingle(query)), batch);
+        return new UpdateQuery(getConveyor(), getConnection(connectionSupplier), checkAnonymous(checkSingle(query)), batch);
     }
 
     /**
@@ -361,7 +361,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid SQL statement", query));
         }
-        return new QueryImpl(getConnection(connectionSupplier), checkAnonymous(checkSingle(query)), parameters);
+        return new QueryImpl(getConveyor(), getConnection(connectionSupplier), checkAnonymous(checkSingle(query)), parameters);
     }
 
     /**

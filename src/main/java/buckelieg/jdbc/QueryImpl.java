@@ -19,6 +19,7 @@ import javax.annotation.Nonnull;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -28,8 +29,8 @@ import static java.lang.System.currentTimeMillis;
 @SuppressWarnings("unchecked")
 final class QueryImpl extends AbstractQuery<Statement> {
 
-    QueryImpl(Connection connection, String query, Object... params) {
-        super(connection, query, params);
+    QueryImpl(Executor conveyor, Connection connection, String query, Object... params) {
+        super(conveyor, connection, query, params);
     }
 
     /**

@@ -109,13 +109,13 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
             for (String query : script.split(STATEMENT_DELIMITER)) {
                 try {
                     if (isAnonymous(query)) {
-                        executeQuery(new QueryImpl(conn, query));
+                        executeQuery(new QueryImpl(conveyor, conn, query));
                     } else {
                         Map.Entry<String, Object[]> preparedQuery = prepareQuery(query, params);
                         if (isProcedure(preparedQuery.getKey())) {
                             new StoredProcedureQuery(conveyor, metaCache, conn, preparedQuery.getKey(), stream(preparedQuery.getValue()).map(p -> p instanceof P ? (P<?>) p : P.in(p)).toArray(P[]::new)).skipWarnings(skipWarnings).print(this::log).call();
                         } else {
-                            executeQuery(new QueryImpl(conn, preparedQuery.getKey(), preparedQuery.getValue()));
+                            executeQuery(new QueryImpl(conveyor, conn, preparedQuery.getKey(), preparedQuery.getValue()));
                         }
                     }
                 } catch (Exception e) {
