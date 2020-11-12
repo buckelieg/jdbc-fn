@@ -219,7 +219,7 @@ public final class Utils {
             StringBuilder message = ofNullable(t.getMessage()).map(msg -> new StringBuilder(format("%s ", msg.trim()))).orElse(new StringBuilder());
             AtomicReference<String> prevMsg = new AtomicReference<>();
             while ((t = t.getCause()) != null) {
-                ofNullable(t.getMessage()).map(msg -> format("%s ", msg.trim())).filter(msg -> prevMsg.get() != null && prevMsg.get().equals(msg)).ifPresent(message::append);
+                ofNullable(t.getMessage()).map(msg -> format("%s ", msg.trim())).filter(msg -> prevMsg.get() == null || !prevMsg.get().equals(msg)).ifPresent(message::append);
                 prevMsg.set(t.getMessage() != null ? t.getMessage().trim() : null);
             }
             messages.append(message);
