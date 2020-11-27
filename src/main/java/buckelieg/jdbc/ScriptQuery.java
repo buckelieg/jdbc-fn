@@ -15,6 +15,8 @@
  */
 package buckelieg.jdbc;
 
+import buckelieg.jdbc.fn.TrySupplier;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.annotation.ParametersAreNonnullByDefault;
@@ -47,7 +49,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     };
 
     private final String script;
-    private final Connection connection;
+    private final TrySupplier<Connection, SQLException> connectionSupplier;
     private final List<T> params;
     private String query;
     private final ExecutorService conveyor;
@@ -64,14 +66,14 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     /**
      * Creates script executor query
      *
-     * @param connection db connection
+     * @param connectionSupplier db connection supplier function
      * @param script     an arbitrary SQL script to execute
      * @throws IllegalArgumentException in case of corrupted script (like illegal comment lines encountered)
      */
-    ScriptQuery(ExecutorService conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, Connection connection, String script, @Nullable Iterable<T> namedParams) {
+    ScriptQuery(ExecutorService conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, TrySupplier<Connection, SQLException> connectionSupplier, String script, @Nullable Iterable<T> namedParams) {
         this.conveyor = conveyor;
         this.metaCache = metaCache;
-        this.connection = connection;
+        this.connectionSupplier = connectionSupplier;
         this.script = script;
         this.params = namedParams == null ? emptyList() : StreamSupport.stream(namedParams.spliterator(), false).collect(Collectors.toList());
     }
@@ -104,18 +106,18 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     }
 
     private long doExecute() throws SQLException {
-        return doInTransaction(false, () -> connection, null, conn -> {
+        return doInTransaction(false, connectionSupplier, null, conn -> {
             long start = currentTimeMillis();
             for (String query : script.split(STATEMENT_DELIMITER)) {
                 try {
                     if (isAnonymous(query)) {
-                        executeQuery(new QueryImpl(conveyor, conn, query));
+                        executeQuery(new QueryImpl(conveyor, () -> conn, query));
                     } else {
                         Map.Entry<String, Object[]> preparedQuery = prepareQuery(query, params);
                         if (isProcedure(preparedQuery.getKey())) {
-                            new StoredProcedureQuery(conveyor, metaCache, conn, preparedQuery.getKey(), stream(preparedQuery.getValue()).map(p -> p instanceof P ? (P<?>) p : P.in(p)).toArray(P[]::new)).skipWarnings(skipWarnings).print(this::log).call();
+                            new StoredProcedureQuery(conveyor, metaCache, () -> conn, preparedQuery.getKey(), stream(preparedQuery.getValue()).map(p -> p instanceof P ? (P<?>) p : P.in(p)).toArray(P[]::new)).skipWarnings(skipWarnings).print(this::log).call();
                         } else {
-                            executeQuery(new QueryImpl(conveyor, conn, preparedQuery.getKey(), preparedQuery.getValue()));
+                            executeQuery(new QueryImpl(conveyor, () -> conn, preparedQuery.getKey(), preparedQuery.getValue()));
                         }
                     }
                 } catch (Exception e) {

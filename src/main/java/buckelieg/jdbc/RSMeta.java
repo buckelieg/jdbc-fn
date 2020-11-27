@@ -28,6 +28,7 @@ import java.util.function.Consumer;
 import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static buckelieg.jdbc.Utils.rsStream;
 import static java.lang.String.format;
+import static java.util.Objects.requireNonNull;
 import static java.util.Optional.ofNullable;
 import static java.util.stream.Collectors.toList;
 
@@ -42,8 +43,8 @@ final class RSMeta implements Metadata {
         @Override
         public String toString() {
             return format("%s%s%s",
-                    catalog == null ? "" : catalog + ".",
-                    schema == null ? "" : schema + ".",
+                    catalog == null || catalog.isEmpty() ? "" : catalog + ".",
+                    schema == null || schema.isEmpty() ? "" : schema + ".",
                     name
             );
         }
@@ -62,9 +63,9 @@ final class RSMeta implements Metadata {
         @Override
         public String toString() {
             return format("%s%s%s%s",
-                    ownTable.catalog == null ? "" : ownTable.catalog + ".",
-                    ownTable.schema == null ? "" : ownTable.schema + ".",
-                    ownTable.name == null ? "" : ownTable.name + ".",
+                    ownTable.catalog == null || ownTable.catalog.isEmpty() ? "" : ownTable.catalog + ".",
+                    ownTable.schema == null || ownTable.schema.isEmpty() ? "" : ownTable.schema + ".",
+                    ownTable.name == null || ownTable.name.isEmpty() ? "" : ownTable.name + ".",
                     name
             );
         }
@@ -129,7 +130,7 @@ final class RSMeta implements Metadata {
     }
 
     @Override
-    public boolean exists(String columnName) {
+    public boolean exists(@Nullable String columnName) {
         return getColumn(columnName).isPresent();
     }
 
@@ -146,7 +147,7 @@ final class RSMeta implements Metadata {
 
     @Override
     public boolean isPrimaryKey(String columnName) {
-        return getColumn(columnName).map(this::isPrimaryKey).orElse(false);
+        return getColumn(requireNonNull(columnName, "Column name must be provided")).map(this::isPrimaryKey).orElse(false);
     }
 
     @Override
@@ -156,7 +157,7 @@ final class RSMeta implements Metadata {
 
     @Override
     public boolean isForeignKey(String columnName) {
-        return getColumn(columnName).map(this::isForeignKey).orElse(false);
+        return getColumn(requireNonNull(columnName, "Column name must be provided")).map(this::isForeignKey).orElse(false);
     }
 
     @Override
@@ -166,7 +167,7 @@ final class RSMeta implements Metadata {
 
     @Override
     public boolean isNullable(String columnName) {
-        return getColumn(columnName).map(this::isNullable).orElse(false);
+        return getColumn(requireNonNull(columnName, "Column name must be provided")).map(this::isNullable).orElse(false);
     }
 
     @Nonnull
@@ -178,7 +179,7 @@ final class RSMeta implements Metadata {
     @Nonnull
     @Override
     public SQLType getSQLType(String columnName) {
-        return getColumn(columnName).map(this::getSQLType).orElse(JDBCType.OTHER);
+        return getColumn(requireNonNull(columnName, "Column name must be provided")).map(this::getSQLType).orElse(JDBCType.OTHER);
     }
 
     @Nonnull
@@ -190,7 +191,7 @@ final class RSMeta implements Metadata {
     @Nonnull
     @Override
     public Class<?> getType(String columnName) {
-        Optional<Class<?>> aClass = getColumn(columnName).map(c -> c.javaType);
+        Optional<Class<?>> aClass = getColumn(requireNonNull(columnName, "Column name must be provided")).map(c -> c.javaType);
         return aClass.isPresent() ? aClass.get() : Object.class;
     }
 
@@ -203,7 +204,7 @@ final class RSMeta implements Metadata {
 
     @Nonnull
     @Override
-    public Optional<String> referencedTable(String columnName) {
+    public Optional<String> referencedTable(@Nullable String columnName) {
         return getColumn(columnName).filter(this::isForeignKey).map(c -> c.refTable.toString());
     }
 
@@ -302,8 +303,8 @@ final class RSMeta implements Metadata {
         }
     }
 
-    private Optional<Column> getColumn(String columnName) {
-        return getColumns().stream().filter(c -> c.name.equalsIgnoreCase(columnName)).findFirst();
+    private Optional<Column> getColumn(@Nullable String columnName) {
+        return null == columnName || columnName.isEmpty() ? Optional.empty() : getColumns().stream().filter(c -> c.name.equalsIgnoreCase(columnName)).findFirst();
     }
 
     private Column getColumn(Table table, String column, @Nullable TryConsumer<Column, Exception> enricher) {

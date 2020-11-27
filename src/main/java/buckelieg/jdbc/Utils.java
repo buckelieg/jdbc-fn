@@ -219,7 +219,7 @@ public final class Utils {
             StringBuilder message = ofNullable(t.getMessage()).map(msg -> new StringBuilder(format("%s ", msg.trim()))).orElse(new StringBuilder());
             AtomicReference<String> prevMsg = new AtomicReference<>();
             while ((t = t.getCause()) != null) {
-                ofNullable(t.getMessage()).map(msg -> format("%s ", msg.trim())).filter(msg -> prevMsg.get() == null || !prevMsg.get().equals(msg)).ifPresent(message::append);
+                ofNullable(t.getMessage()).map(msg -> format("%s ", msg.trim())).filter(msg -> prevMsg.get() != null && prevMsg.get().equals(msg)).ifPresent(message::append);
                 prevMsg.set(t.getMessage() != null ? t.getMessage().trim() : null);
             }
             messages.append(message);
@@ -227,37 +227,35 @@ public final class Utils {
         return new SQLRuntimeException(messages.toString().trim(), true);
     }
 
-    @SuppressWarnings("SynchronizationOnLocalVariableOrMethodParameter")
+//    @SuppressWarnings("SynchronizationOnLocalVariableOrMethodParameter")
     static <T> T doInTransaction(boolean forceClose, TrySupplier<Connection, SQLException> connectionSupplier, TransactionIsolation isolationLevel, TryFunction<Connection, T, SQLException> action) throws SQLException {
         Connection conn = connectionSupplier.get();
-        synchronized (conn) {
-            boolean autoCommit = true;
-            Savepoint savepoint = null;
-            int isolation = conn.getTransactionIsolation();
-            T result;
-            try {
-                autoCommit = conn.getAutoCommit();
-                conn.setAutoCommit(false);
-                savepoint = conn.setSavepoint();
-                if (isolationLevel != null && isolation != isolationLevel.level) {
-                    if (!conn.getMetaData().supportsTransactionIsolationLevel(isolationLevel.level)) {
-                        throw new IllegalArgumentException(format("Unsupported transaction isolation level: '%s'", isolationLevel.name()));
-                    }
-                    conn.setTransactionIsolation(isolationLevel.level);
+        boolean autoCommit = true;
+        Savepoint savepoint = null;
+        int isolation = conn.getTransactionIsolation();
+        T result;
+        try {
+            autoCommit = conn.getAutoCommit();
+            conn.setAutoCommit(false);
+            savepoint = conn.setSavepoint();
+            if (isolationLevel != null && isolation != isolationLevel.level) {
+                if (!conn.getMetaData().supportsTransactionIsolationLevel(isolationLevel.level)) {
+                    throw new IllegalArgumentException(format("Unsupported transaction isolation level: '%s'", isolationLevel.name()));
                 }
-                result = action.apply(conn);
-                conn.commit();
-                return result;
-            } catch (Exception e) {
-                conn.rollback(savepoint);
-                conn.releaseSavepoint(savepoint);
-                throw e;
-            } finally {
-                conn.setAutoCommit(autoCommit);
-                conn.setTransactionIsolation(isolation);
-                if (forceClose) {
-                    conn.close();
-                }
+                conn.setTransactionIsolation(isolationLevel.level);
+            }
+            result = action.apply(conn);
+            conn.commit();
+            return result;
+        } catch (Exception e) {
+            conn.rollback(savepoint);
+            conn.releaseSavepoint(savepoint);
+            throw e;
+        } finally {
+            conn.setAutoCommit(autoCommit);
+            conn.setTransactionIsolation(isolation);
+            if (forceClose) {
+                conn.close();
             }
         }
     }

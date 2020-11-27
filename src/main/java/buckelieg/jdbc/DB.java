@@ -59,7 +59,7 @@ import static java.util.stream.Stream.of;
 @ParametersAreNonnullByDefault
 public final class DB implements AutoCloseable {
 
-    private Connection connection;
+    private volatile Connection connection;
     private final TrySupplier<Connection, SQLException> connectionSupplier;
     private ExecutorService conveyor;
     private boolean shutdownConveyor = true;
@@ -174,7 +174,7 @@ public final class DB implements AutoCloseable {
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Nonnull
     public final Script script(String script, Map<String, ?> namedParameters) {
-        return new ScriptQuery(getConveyor(), metaCache, getConnection(connectionSupplier), cutComments(requireNonNull(script, "SQL script must be provided")), namedParameters.entrySet());
+        return new ScriptQuery(getConveyor(), metaCache, getConnectionSupplier(false), cutComments(requireNonNull(script, "SQL script must be provided")), namedParameters.entrySet());
     }
 
     /**
@@ -190,7 +190,7 @@ public final class DB implements AutoCloseable {
     @SafeVarargs
     @Nonnull
     public final <T extends Entry<String, ?>> Script script(String script, T... namedParameters) {
-        return new ScriptQuery(getConveyor(), metaCache, getConnection(connectionSupplier), cutComments(requireNonNull(script, "SQL script must be provided")), asList(namedParameters));
+        return new ScriptQuery(getConveyor(), metaCache, getConnectionSupplier(false), cutComments(requireNonNull(script, "SQL script must be provided")), asList(namedParameters));
     }
 
     /**
@@ -294,7 +294,7 @@ public final class DB implements AutoCloseable {
                 );
             }
         }
-        return new StoredProcedureQuery(getConveyor(), metaCache, getConnection(connectionSupplier), query, parameters);
+        return new StoredProcedureQuery(getConveyor(), metaCache, getConnectionSupplier(false), query, parameters);
     }
 
     /**
@@ -325,7 +325,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid select statement", query));
         }
-        return new SelectQuery(getConveyor(), metaCache, getConnection(connectionSupplier), checkAnonymous(checkSingle(query)), parameters);
+        return new SelectQuery(getConveyor(), metaCache, getConnectionSupplier(false), checkAnonymous(checkSingle(query)), parameters);
     }
 
 
@@ -344,7 +344,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid DML statement", query));
         }
-        return new UpdateQuery(getConveyor(), getConnection(connectionSupplier), checkAnonymous(checkSingle(query)), batch);
+        return new UpdateQuery(getConveyor(), getConnectionSupplier(false), checkAnonymous(checkSingle(query)), batch);
     }
 
     /**
@@ -361,7 +361,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid SQL statement", query));
         }
-        return new QueryImpl(getConveyor(), getConnection(connectionSupplier), checkAnonymous(checkSingle(query)), parameters);
+        return new QueryImpl(getConveyor(), getConnectionSupplier(false), checkAnonymous(checkSingle(query)), parameters);
     }
 
     /**
@@ -556,7 +556,7 @@ public final class DB implements AutoCloseable {
     @Nullable
     private <T> T doInTransaction(boolean createNew, @Nullable TransactionIsolation level, TryFunction<DB, T, SQLException> action) {
         try {
-            return Utils.doInTransaction(createNew && connection != null, getConnectionSupplier(connectionSupplier, createNew), level, conn -> requireNonNull(action, "Action must be provided").apply(createNew && connection != null ? new DB(getConveyor(), metaCache, conn, connectionSupplier) : this));
+            return Utils.doInTransaction(createNew && connection != null, getConnectionSupplier(createNew), level, conn -> requireNonNull(action, "Action must be provided").apply(createNew && connection != null ? new DB(getConveyor(), metaCache, conn, connectionSupplier) : this));
         } catch (SQLException e) {
             throw newSQLRuntimeException(e);
         }
@@ -579,11 +579,11 @@ public final class DB implements AutoCloseable {
         return toQuery.apply(preparedQuery.getKey(), preparedQuery.getValue());
     }
 
-    private TrySupplier<Connection, SQLException> getConnectionSupplier(TrySupplier<Connection, SQLException> supplier, boolean forceNew) {
+    private TrySupplier<Connection, SQLException> getConnectionSupplier(boolean forceNew) {
         return () -> {
             if (forceNew) {
                 synchronized (this) {
-                    Connection newConnection = requireNonNull(supplier.get(), "Connection supplier must provide a connection");
+                    Connection newConnection = requireNonNull(connectionSupplier.get(), "Connection supplier must provide a connection");
                     if (connection != null && connection == newConnection) {
                         throw new UnsupportedOperationException("No new connection created");
                     }
@@ -595,7 +595,7 @@ public final class DB implements AutoCloseable {
             } else if (connection == null || connection.isClosed()) {
                 synchronized (this) {
                     if (connection == null || connection.isClosed()) {
-                        connection = requireNonNull(supplier.get(), "Connection supplier must provide a connection");
+                        connection = requireNonNull(connectionSupplier.get(), "Connection supplier must provide a connection");
                         if (connection.isClosed()) {
                             throw new SQLException("Provided connection is already closed");
                         }
@@ -606,19 +606,11 @@ public final class DB implements AutoCloseable {
         };
     }
 
-    private Connection getConnection(TrySupplier<Connection, SQLException> supplier) {
-        try {
-            return getConnectionSupplier(supplier, false).get();
-        } catch (SQLException e) {
-            throw newSQLRuntimeException(e);
-        }
-    }
-
     private ExecutorService getConveyor() {
         if (conveyor == null || conveyor.isShutdown() || conveyor.isTerminated()) {
             synchronized (this) {
                 if (conveyor == null || conveyor.isShutdown() || conveyor.isTerminated()) {
-                    conveyor = Executors.newCachedThreadPool();
+                    conveyor = Executors.newWorkStealingPool();
                 }
             }
         }

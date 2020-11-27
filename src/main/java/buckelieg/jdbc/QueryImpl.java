@@ -15,9 +15,12 @@
  */
 package buckelieg.jdbc;
 
+import buckelieg.jdbc.fn.TrySupplier;
+
 import javax.annotation.Nonnull;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -29,8 +32,8 @@ import static java.lang.System.currentTimeMillis;
 @SuppressWarnings("unchecked")
 final class QueryImpl extends AbstractQuery<Statement> {
 
-    QueryImpl(Executor conveyor, Connection connection, String query, Object... params) {
-        super(conveyor, connection, query, params);
+    QueryImpl(Executor conveyor, TrySupplier<Connection, SQLException> connectionSupplier, String query, Object... params) {
+        super(conveyor, connectionSupplier, query, params);
     }
 
     /**
@@ -41,9 +44,9 @@ final class QueryImpl extends AbstractQuery<Statement> {
     @Nonnull
     @Override
     public Long execute() {
-        long start = currentTimeMillis();
-        jdbcTry(() -> {
-            statement = isPrepared ? setStatementParameters(connection.prepareStatement(query), params) : connection.createStatement();
+        long result = runSync(() -> {
+            long start = currentTimeMillis();
+            statement = isPrepared ? setStatementParameters(connectionSupplier.get().prepareStatement(query), params) : connectionSupplier.get().createStatement();
             setTimeout();
             setPoolable();
             setEscapeProcessing();
@@ -52,9 +55,10 @@ final class QueryImpl extends AbstractQuery<Statement> {
             } else {
                 statement.execute(query);
             }
+            return currentTimeMillis() - start;
         });
         close(); // force closing this statement since we will not process any of its possible results
-        return currentTimeMillis() - start;
+        return result;
     }
 
     @Nonnull

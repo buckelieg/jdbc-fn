@@ -621,6 +621,7 @@ public interface Select extends Query {
     default <T> List<T> list(TryTriFunction<ResultSet, Integer, Metadata, T, SQLException> mapper) {
         return execute(mapper).collect(toList());
     }
+
     /**
      * Shorthand for stream mapping to list
      *

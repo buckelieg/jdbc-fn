@@ -25,6 +25,10 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 import static buckelieg.jdbc.Utils.newSQLRuntimeException;
@@ -38,8 +42,7 @@ abstract class AbstractQuery<S extends Statement> implements Query {
     protected S statement;
     protected final String query;
     private final String sqlString;
-    protected final Connection connection;
-    protected final boolean autoCommit;
+    protected final TrySupplier<Connection, SQLException> connectionSupplier;
     protected boolean skipWarnings = true;
     protected final boolean isPrepared;
     protected int timeout;
@@ -49,27 +52,31 @@ abstract class AbstractQuery<S extends Statement> implements Query {
     protected boolean poolable;
     protected boolean escapeProcessing;
     protected final Object[] params;
+    protected Connection connectionInUse;
 
-    AbstractQuery(Executor conveyor, Connection connection, String query, Object... params) {
-        try {
-            this.conveyor = conveyor;
-            this.query = query;
-            this.connection = connection;
-            this.params = params;
-            this.autoCommit = connection.getAutoCommit();
-            this.isPrepared = params != null && params.length != 0;
-            this.sqlString = asSQL(query, params);
-        } catch (SQLException e) {
-            throw newSQLRuntimeException(e);
-        }
+    private final Lock lock = new ReentrantLock();
+    private final Condition condition = lock.newCondition();
+    private final AtomicBoolean isRunning = new AtomicBoolean(false);
+
+    AbstractQuery(Executor conveyor, TrySupplier<Connection, SQLException> connectionSupplier, String query, Object... params) {
+        this.conveyor = conveyor;
+        this.query = query;
+        this.connectionSupplier = connectionSupplier;
+        this.params = params;
+        this.isPrepared = params != null && params.length != 0;
+        this.sqlString = asSQL(query, params);
     }
 
     @Override
     public void close() {
-        try {
-            statement.close(); // by JDBC spec: subsequently closes all result sets opened by this statement
-        } catch (SQLException e) {
-            throw newSQLRuntimeException(e);
+        if (statement != null) {
+            try {
+                if(!statement.isClosed()) {
+                    statement.close(); // by JDBC spec: subsequently closes all result sets opened by this statement
+                }
+            } catch (SQLException e) {
+                throw newSQLRuntimeException(e);
+            }
         }
     }
 
@@ -125,7 +132,7 @@ abstract class AbstractQuery<S extends Statement> implements Query {
             close();
             throw newSQLRuntimeException(e);
         } catch (Exception e) {
-            if(!e.getClass().equals(SQLRuntimeException.class)) {
+            if (!e.getClass().equals(SQLRuntimeException.class)) {
                 close();
                 throw new RuntimeException(e);
             } else {
@@ -147,7 +154,7 @@ abstract class AbstractQuery<S extends Statement> implements Query {
             close();
             throw newSQLRuntimeException(e);
         } catch (Exception e) {
-            if(!e.getClass().equals(SQLRuntimeException.class)) {
+            if (!e.getClass().equals(SQLRuntimeException.class)) {
                 close();
                 throw new RuntimeException(e);
             } else {
@@ -158,6 +165,23 @@ abstract class AbstractQuery<S extends Statement> implements Query {
 
     final void setStatementParameter(TryConsumer<S, SQLException> action) {
         jdbcTry(() -> action.accept(statement));
+    }
+
+    final synchronized <O> O runSync(TrySupplier<O, SQLException> action) {
+        try {
+            lock.lock();
+            while (isRunning.get()) {
+                condition.await();
+            }
+            isRunning.set(true);
+            return jdbcTry(action);
+        } catch (Exception e) {
+            throw newSQLRuntimeException(e);
+        } finally {
+            isRunning.set(false);
+            condition.signalAll();
+            lock.unlock();
+        }
     }
 
     String asSQL(String query, Object... params) {

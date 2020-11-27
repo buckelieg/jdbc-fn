@@ -17,6 +17,7 @@ package buckelieg.jdbc;
 
 import buckelieg.jdbc.Utils.DefaultMapper;
 import buckelieg.jdbc.fn.TryFunction;
+import buckelieg.jdbc.fn.TrySupplier;
 
 import javax.annotation.Nonnull;
 import javax.annotation.ParametersAreNonnullByDefault;
@@ -40,8 +41,8 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
     private TryFunction<CallableStatement, ?, SQLException> mapper;
     private Consumer consumer;
 
-    StoredProcedureQuery(Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, Connection connection, String query, P<?>... params) {
-        super(conveyor, metaCache, connection, query, params);
+    StoredProcedureQuery(Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, TrySupplier<Connection, SQLException> connectionSupplier, String query, P<?>... params) {
+        super(conveyor, metaCache, connectionSupplier, query, params);
     }
 
     @Nonnull
@@ -92,7 +93,7 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
                     rs = statement.getResultSet();
                     currentResultSetNumber++;
                     wrapper = new ImmutableResultSet(rs);
-                    meta.set(new RSMeta(connection, rs, metaCache));
+                    meta.set(new RSMeta(connectionInUse, rs, metaCache));
                     return super.doHasNext();
                 }
                 try {
@@ -109,8 +110,9 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
 
     @Override
     protected Statement prepareStatement() throws SQLException {
+        connectionInUse = connectionSupplier.get();
         if(isPrepared) {
-            CallableStatement cs = connection.prepareCall(query);
+            CallableStatement cs = connectionInUse.prepareCall(query);
             for (int i = 1; i <= params.length; i++) {
                 P<?> p = (P<?>) params[i - 1];
                 if (p.isOut() || p.isInOut()) {
@@ -128,6 +130,6 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
             }
             return cs;
         }
-        return connection.createStatement();
+        return connectionInUse.createStatement();
     }
 }

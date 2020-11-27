@@ -27,6 +27,8 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.sql.*;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -112,6 +114,7 @@ public class DBTestSuite {
             System.out.println(String.format("%s.%s:%s", meta.getTableName(col), meta.getColumnLabel(col), meta.getColumnClassName(col)));
         }
         pst.close();
+        db.select("SELECT * FROM TEST").single((rs, m) -> m.getColumnNames().stream()).orElse(Stream.empty()).forEach(System.out::println);
     }
 
     @Test
@@ -452,7 +455,7 @@ public class DBTestSuite {
                         )
                         .orElse(null)
         );
-        System.out.println(db.select("SELECT * FROM test WHERE id=?", result).single());
+        System.out.println(db.select("SELECT * FROM test WHERE id=?", result).print().single());
         assertEquals(Long.valueOf(13L), result);
     }
 
@@ -674,6 +677,15 @@ public class DBTestSuite {
         Select select = db.select("SELECT * FROM TEST");
         assertEquals(10, select.list().size());
         assertEquals(0, select.list().size());
+    }
+
+    @Test
+    public void testParallelSelect() throws Exception {
+        ExecutorService service = Executors.newFixedThreadPool(2);
+        service.execute(() -> db.select("SELECT * FROM TEST").print(sql -> System.out.println(Thread.currentThread().getName() + " " + sql)).list());
+        service.execute(() -> db.select("SELECT * FROM TEST").print(sql -> System.out.println(Thread.currentThread().getName() + " " + sql)).list());
+        service.shutdown();
+        service.awaitTermination(5, TimeUnit.MINUTES);
     }
 
 }

@@ -17,6 +17,7 @@ package buckelieg.jdbc;
 
 import buckelieg.jdbc.fn.TryBiFunction;
 import buckelieg.jdbc.fn.TryFunction;
+import buckelieg.jdbc.fn.TrySupplier;
 
 import javax.annotation.Nonnull;
 import javax.annotation.ParametersAreNonnullByDefault;
@@ -51,8 +52,8 @@ final class UpdateQuery extends AbstractQuery<Statement> implements Update {
     private String[] colNames = null;
     private boolean useGeneratedKeys = false;
 
-    UpdateQuery(Executor conveyor, Connection connection, String query, Object[]... batch) {
-        super(conveyor, connection, query, (Object) batch);
+    UpdateQuery(Executor conveyor, TrySupplier<Connection, SQLException> connectionSupplier, String query, Object[]... batch) {
+        super(conveyor, connectionSupplier, query, (Object) batch);
         this.batch = batch;
     }
 
@@ -109,7 +110,7 @@ final class UpdateQuery extends AbstractQuery<Statement> implements Update {
         requireNonNull(valueMapper, "Generated values mapper must be provided!");
         requireNonNull(generatedValuesHandler, "Generated values handler must be provided");
         useGeneratedKeys = true;
-        return jdbcTry(() -> TryBiFunction.<Connection, TryFunction<ResultSet, K, SQLException>, Object, SQLException>of(this::doExecute).andThen(generatedKeys -> generatedValuesHandler.apply(((Stream<K>) generatedKeys).onClose(this::close))).apply(connection, valueMapper));
+        return jdbcTry(() -> TryBiFunction.<Connection, TryFunction<ResultSet, K, SQLException>, Object, SQLException>of(this::doExecute).andThen(generatedKeys -> generatedValuesHandler.apply(((Stream<K>) generatedKeys).onClose(this::close))).apply(connectionSupplier.get(), valueMapper));
     }
 
     @Nonnull
@@ -128,10 +129,11 @@ final class UpdateQuery extends AbstractQuery<Statement> implements Update {
 
     @Nonnull
     public Long execute() {
-        return (long) jdbcTry(() -> batch.length > 1 ? doInTransaction(false, () -> connection, null, conn -> doExecute(connection, NOOP)) : doExecute(connection, NOOP));
+        return (long) runSync(() -> batch.length > 1 ? doInTransaction(false, connectionSupplier, null, conn -> doExecute(conn, NOOP)) : doExecute(connectionSupplier.get(), NOOP));
     }
 
     private <K> Object doExecute(Connection conn, TryFunction<ResultSet, K, SQLException> valueMapper) throws SQLException {
+        connectionInUse = conn;
         if (useGeneratedKeys) {
             if (colNames != null && colNames.length != 0) {
                 statement = conn.prepareStatement(query, colNames);
@@ -152,7 +154,7 @@ final class UpdateQuery extends AbstractQuery<Statement> implements Update {
     private <K> Stream<K> executeUpdateWithGeneratedKeys(TryFunction<ResultSet, K, SQLException> valueMapper) {
         return of(batch).onClose(this::close).reduce(
                 new ArrayList<K>(),
-                (genKeys, params) ->jdbcTry(() -> {
+                (genKeys, params) -> jdbcTry(() -> {
                     if (isLarge) {
                         setStatementParameters((PreparedStatement) statement, params).executeLargeUpdate();
                     } else {

@@ -16,6 +16,7 @@
 package buckelieg.jdbc;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import javax.annotation.ParametersAreNonnullByDefault;
 import java.sql.ResultSet;
 import java.sql.SQLType;
@@ -37,8 +38,8 @@ public interface Metadata {
      * @param columnName a name of the column to test existence with
      * @return true if the column with provided name exists, false - otherwise
      */
-    default boolean exists(String columnName) {
-        return getColumnNames().stream().anyMatch(col -> col.equalsIgnoreCase(columnName));
+    default boolean exists(@Nullable String columnName) {
+        return null != columnName && !columnName.isEmpty() && getColumnNames().stream().anyMatch(col -> col.equalsIgnoreCase(columnName));
     }
 
     /**
@@ -163,21 +164,21 @@ public interface Metadata {
     Class<?> getType(String columnName);
 
     /**
-     * Retrieves references table by this foreign key column
+     * Retrieves referenced table by this foreign key column
      *
      * @param columnIndex column index in the result
-     * @return a referenced table's full name (e.g. catalog.schema.name) if this column is not a foreign key
+     * @return a referenced table's full name (e.g. catalog.schema.name) if this column is a foreign key
      */
     @Nonnull
     Optional<String> referencedTable(int columnIndex);
 
     /**
-     * Retrieves references table by this foreign key column
+     * Retrieves referenced table by this foreign key column
      *
      * @param columnName column name in the result
-     * @return a referenced table's full name (e.g. catalog.schema.name) if this column is not a foreign key
+     * @return a referenced table's full name (e.g. catalog.schema.name) if this column is a foreign key
      */
     @Nonnull
-    Optional<String> referencedTable(String columnName);
+    Optional<String> referencedTable(@Nullable String columnName);
 
 }

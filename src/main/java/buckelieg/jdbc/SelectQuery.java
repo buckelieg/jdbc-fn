@@ -34,7 +34,6 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static buckelieg.jdbc.Utils.setStatementParameters;
 import static java.lang.Math.max;
 import static java.util.Collections.singletonList;
@@ -121,8 +120,8 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     private final Map<String, String> columnNamesMappings = new HashMap<>();
     protected final AtomicReference<Metadata> meta = new AtomicReference<>();
 
-    SelectQuery(Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, Connection connection, String query, Object... params) {
-        super(conveyor, connection, query, params);
+    SelectQuery(Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, TrySupplier<Connection, SQLException> connectionSupplier, String query, Object... params) {
+        super(conveyor, connectionSupplier, query, params);
         this.metaCache = metaCache;
     }
 
@@ -181,7 +180,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
                 statement = SelectQuery.this.prepareStatement();
                 SelectQuery.this.doExecute();
                 wrapper = new MutableResultSet(rs);
-                Metadata meta = new RSMeta(connection, rs, metaCache);
+                Metadata meta = new RSMeta(connectionInUse, rs, metaCache);
                 rs.moveToInsertRow();
                 List<T> inserted = toInsert.stream().filter(row -> doInsert(row, meta)).collect(toList());
                 rs.close();
@@ -272,7 +271,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
         }
         List<T> excluded = new ArrayList<>(toDelete.size());
         AtomicBoolean isRemovable = new AtomicBoolean(true);
-        Metadata meta = new RSMeta(connection, rs, metaCache);
+        Metadata meta = new RSMeta(connectionInUse, rs, metaCache);
         return toDelete.isEmpty() ? stream : stream.filter(row -> jdbcTry(() -> {
             Iterator<T> it = toDelete.iterator();
             while (it.hasNext()) {
@@ -329,7 +328,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
                 AtomicBoolean isRemovable = new AtomicBoolean(true);
                 Stream<T> stream = SelectQuery.this.execute(mapper);
                 wrapper = new MutableResultSet(rs);
-                Metadata meta = new RSMeta(connection, rs, metaCache);
+                Metadata meta = new RSMeta(connectionInUse, rs, metaCache);
                 return toUpdate.isEmpty() ? stream : onlyUpdated ? stream.filter(row -> doUpdate(row, exclude, toUpdate, isRemovable, meta).isPresent()) : stream.map(row -> doUpdate(row, exclude, toUpdate, isRemovable, meta).orElse(row));
             }
 
@@ -387,7 +386,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
                 if (onlyUpdated && toUpdate.isEmpty()) return empty();
                 isMutable = true;
                 Stream<Map<String, Object>> stream = SelectQuery.this.execute();
-                Metadata meta = new RSMeta(connection, rs, metaCache);
+                Metadata meta = new RSMeta(connectionInUse, rs, metaCache);
                 return toUpdate.isEmpty() ? stream : onlyUpdated ? stream.filter(row -> doUpdate(row, toUpdate, meta).isPresent()) : stream.map(row -> doUpdate(row, toUpdate, meta).orElse(row));
             }
 
@@ -439,9 +438,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     public final <T> Stream<T> execute(TryTriFunction<ResultSet, Integer, Metadata, T, SQLException> mapper) {
         requireNonNull(mapper, "Mapper must be provided");
         if (rs != null && hasMoved && !hasNext) return empty();
-
-        return StreamSupport.stream(jdbcTry(() -> {
-            connection.setAutoCommit(false);
+        return runSync(() -> StreamSupport.stream(jdbcTry(() -> {
             statement = prepareStatement();
             setPoolable();
             setEscapeProcessing();
@@ -456,10 +453,10 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
             doExecute();
             if (rs != null) {
                 wrapper = new ImmutableResultSet(rs);
-                meta.set(new RSMeta(connection, rs, metaCache));
+                meta.set(new RSMeta(connectionInUse, rs, metaCache));
             }
             return this;
-        }), false).map(rs -> jdbcTry(() -> mapper.apply(wrapper, currentResultSetNumber, meta.get()))).onClose(this::close);
+        }), false).map(rs -> jdbcTry(() -> mapper.apply(wrapper, currentResultSetNumber, meta.get()))).onClose(this::close));
     }
 
     protected void doExecute() throws SQLException {
@@ -557,7 +554,7 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
         }
     }
 
-    @Override
+/*    @Override
     public void close() {
         try {
             connection.setAutoCommit(autoCommit);
@@ -566,10 +563,11 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
         } finally {
             super.close();
         }
-    }
+    }*/
 
     protected Statement prepareStatement() throws SQLException {
-        return isPrepared ? setStatementParameters(connection.prepareStatement(query, ResultSet.TYPE_FORWARD_ONLY, isMutable ? ResultSet.CONCUR_UPDATABLE : ResultSet.CONCUR_READ_ONLY), params) : connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, isMutable ? ResultSet.CONCUR_UPDATABLE : ResultSet.CONCUR_READ_ONLY);
+        connectionInUse = connectionSupplier.get();
+        return isPrepared ? setStatementParameters(connectionInUse.prepareStatement(query, ResultSet.TYPE_FORWARD_ONLY, isMutable ? ResultSet.CONCUR_UPDATABLE : ResultSet.CONCUR_READ_ONLY), params) : connectionInUse.createStatement(ResultSet.TYPE_FORWARD_ONLY, isMutable ? ResultSet.CONCUR_UPDATABLE : ResultSet.CONCUR_READ_ONLY);
     }
 
     private String getColumnName(String columnName, Metadata meta) {
