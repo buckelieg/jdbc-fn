@@ -24,6 +24,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
 import java.util.function.Consumer;
 
 import static buckelieg.jdbc.Utils.setStatementParameters;
@@ -32,8 +34,8 @@ import static java.lang.System.currentTimeMillis;
 @SuppressWarnings("unchecked")
 final class QueryImpl extends AbstractQuery<Statement> {
 
-    QueryImpl(Executor conveyor, TrySupplier<Connection, SQLException> connectionSupplier, String query, Object... params) {
-        super(conveyor, connectionSupplier, query, params);
+    QueryImpl(Lock lock, Condition condition, Executor conveyor, TrySupplier<Connection, SQLException> connectionSupplier, String query, Object... params) {
+        super(lock, condition, false, conveyor, connectionSupplier, null, query, params);
     }
 
     /**

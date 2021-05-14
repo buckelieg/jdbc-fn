@@ -17,9 +17,11 @@ package buckelieg.jdbc;
 
 import buckelieg.jdbc.Utils.DefaultMapper;
 import buckelieg.jdbc.fn.TryFunction;
+import buckelieg.jdbc.fn.TryRunnable;
 import buckelieg.jdbc.fn.TrySupplier;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import javax.annotation.ParametersAreNonnullByDefault;
 import javax.annotation.concurrent.NotThreadSafe;
 import java.sql.*;
@@ -27,6 +29,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -41,8 +45,8 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
     private TryFunction<CallableStatement, ?, SQLException> mapper;
     private Consumer consumer;
 
-    StoredProcedureQuery(Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, TrySupplier<Connection, SQLException> connectionSupplier, String query, P<?>... params) {
-        super(conveyor, metaCache, connectionSupplier, query, params);
+    StoredProcedureQuery(Lock lock, Condition condition, boolean isTransactionRunning, Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, TrySupplier<Connection, SQLException> connectionSupplier, @Nullable TryRunnable<SQLException> onCompleted, String query, P<?>... params) {
+        super(lock, condition, isTransactionRunning, conveyor, metaCache, connectionSupplier, onCompleted, query, params);
     }
 
     @Nonnull

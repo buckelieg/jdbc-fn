@@ -20,6 +20,7 @@ import buckelieg.jdbc.fn.TryConsumer;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.annotation.ParametersAreNonnullByDefault;
+import javax.annotation.ParametersAreNullableByDefault;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
@@ -311,9 +312,16 @@ final class RSMeta implements Metadata {
         return getColumn(table.catalog, table.schema, table.name, column, enricher);
     }
 
-    private Column getColumn(String catalog, String schema, String table, String column, @Nullable TryConsumer<Column, Exception> enricher) {
+    @ParametersAreNullableByDefault
+    private Column getColumn(String catalog, String schema, String table, String column, TryConsumer<Column, Exception> enricher) {
         return columnsCache.compute(
-                format("%s.%s.%s.%s", catalog, schema, table, column),
+                format(
+                        "%s%s%s%s",
+                        catalog == null || catalog.isEmpty() ? "" : "." + catalog,
+                        schema == null || schema.isEmpty() ? "" : "." + schema,
+                        table == null || table.isEmpty() ? "" : "." + table,
+                        column == null || column.isEmpty() ? "" : "." + column
+                ),
                 (k, v) -> {
                     if (v == null) {
                         v = new Column();

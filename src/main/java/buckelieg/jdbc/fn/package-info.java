@@ -17,7 +17,7 @@
  * Functional style programming over plain JDBC
  * <br/>Function collection to be used in conjunction with main classes
  *
- * @see buckelieg.jdbc.fn.TryAction
+ * @see buckelieg.jdbc.fn.TryRunnable
  * @see buckelieg.jdbc.fn.TryConsumer
  * @see buckelieg.jdbc.fn.TryBiConsumer
  * @see buckelieg.jdbc.fn.TryTriConsumer

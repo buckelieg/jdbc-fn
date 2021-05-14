@@ -19,29 +19,29 @@ import static java.util.Objects.requireNonNull;
 
 /**
  * No-argument function which return no result that might throw an exception
- * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #doTry()}
+ * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #run()}
  *
  * @param <E> exception type
  */
 @FunctionalInterface
-public interface TryAction<E extends Throwable> {
+public interface TryRunnable<E extends Throwable> {
 
     /**
      * Performs an action with possible exceptional result
      *
      * @throws E an exception
      */
-    void doTry() throws E;
+    void run() throws E;
 
     /**
      * Returns reference of lambda expression
      *
-     * @param tryAction an action function
-     * @return {@link TryAction} reference
+     * @param tryRunnable an action function
+     * @return {@link TryRunnable} reference
      * @throws NullPointerException if tryAction is null
      */
-    static <E extends Throwable> TryAction<E> of(TryAction<E> tryAction) {
-        return requireNonNull(tryAction);
+    static <E extends Throwable> TryRunnable<E> of(TryRunnable<E> tryRunnable) {
+        return requireNonNull(tryRunnable);
     }
 
     /**
@@ -57,11 +57,11 @@ public interface TryAction<E extends Throwable> {
      * @throws E                    an exception
      * @throws NullPointerException if {@code after} is null
      */
-    default TryAction<E> andThen(TryAction<E> after) throws E {
+    default TryRunnable<E> andThen(TryRunnable<E> after) throws E {
         requireNonNull(after);
         return () -> {
-            doTry();
-            after.doTry();
+            run();
+            after.run();
         };
     }
 
@@ -78,11 +78,11 @@ public interface TryAction<E extends Throwable> {
      * @throws E                    an exception
      * @throws NullPointerException if {@code before} is null
      */
-    default TryAction<E> compose(TryAction<E> before) throws E {
+    default TryRunnable<E> compose(TryRunnable<E> before) throws E {
         requireNonNull(before);
         return () -> {
-            before.doTry();
-            doTry();
+            before.run();
+            run();
         };
     }
 

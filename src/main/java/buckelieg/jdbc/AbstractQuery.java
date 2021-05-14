@@ -15,11 +15,12 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryAction;
 import buckelieg.jdbc.fn.TryConsumer;
+import buckelieg.jdbc.fn.TryRunnable;
 import buckelieg.jdbc.fn.TrySupplier;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -28,9 +29,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
+import static buckelieg.jdbc.Utils.collectAndThrow;
 import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static java.lang.Math.max;
 import static java.util.Objects.requireNonNull;
@@ -48,36 +49,44 @@ abstract class AbstractQuery<S extends Statement> implements Query {
     protected int timeout;
     protected TimeUnit unit = TimeUnit.SECONDS;
     protected boolean isPoolable;
-    protected boolean isEscaped = true;
     protected boolean poolable;
-    protected boolean escapeProcessing;
+    protected boolean escapeProcessing = true;
     protected final Object[] params;
     protected Connection connectionInUse;
+    protected final boolean isTransactionRunning;
+    protected TryRunnable<SQLException> onCompleted;
 
-    private final Lock lock = new ReentrantLock();
-    private final Condition condition = lock.newCondition();
+    private final Lock lock;
+    private final Condition condition;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
-    AbstractQuery(Executor conveyor, TrySupplier<Connection, SQLException> connectionSupplier, String query, Object... params) {
+    AbstractQuery(Lock lock, Condition condition, boolean isTransactionRunning, Executor conveyor, TrySupplier<Connection, SQLException> connectionSupplier, @Nullable TryRunnable<SQLException> onCompleted, String query, Object... params) {
+        this.lock = lock;
+        this.condition = condition;
         this.conveyor = conveyor;
         this.query = query;
         this.connectionSupplier = connectionSupplier;
         this.params = params;
         this.isPrepared = params != null && params.length != 0;
         this.sqlString = asSQL(query, params);
+        this.isTransactionRunning = isTransactionRunning;
+        this.onCompleted = onCompleted;
     }
 
     @Override
     public void close() {
-        if (statement != null) {
-            try {
-                if(!statement.isClosed()) {
-                    statement.close(); // by JDBC spec: subsequently closes all result sets opened by this statement
+        collectAndThrow(
+                () -> {
+                    if (statement != null && !statement.isClosed()) {
+                        statement.close(); // by JDBC spec: subsequently closes all result sets opened by this statement
+                    }
+                },
+                () -> {
+                    if (onCompleted != null) {
+                        onCompleted.run();
+                    }
                 }
-            } catch (SQLException e) {
-                throw newSQLRuntimeException(e);
-            }
-        }
+        );
     }
 
     final void setTimeout() {
@@ -142,9 +151,9 @@ abstract class AbstractQuery<S extends Statement> implements Query {
         return result;
     }
 
-    final void jdbcTry(TryAction<SQLException> action) {
+    final void jdbcTry(TryRunnable<SQLException> action) {
         try {
-            action.doTry();
+            action.run();
             if (!skipWarnings && statement.getWarnings() != null) {
                 throw statement.getWarnings();
             }

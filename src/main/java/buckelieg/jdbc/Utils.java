@@ -15,19 +15,18 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryBiFunction;
-import buckelieg.jdbc.fn.TryFunction;
-import buckelieg.jdbc.fn.TrySupplier;
-import buckelieg.jdbc.fn.TryTriConsumer;
+import buckelieg.jdbc.fn.*;
 
 import javax.annotation.Nonnull;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.sql.*;
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.*;
 import java.util.Map.Entry;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -36,9 +35,11 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import static java.lang.String.format;
+import static java.lang.reflect.Proxy.newProxyInstance;
 import static java.sql.JDBCType.*;
 import static java.util.Arrays.asList;
 import static java.util.Collections.singletonList;
+import static java.util.Objects.requireNonNull;
 import static java.util.Optional.empty;
 import static java.util.Optional.ofNullable;
 import static java.util.stream.Collectors.joining;
@@ -46,7 +47,7 @@ import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Stream.of;
 import static java.util.stream.StreamSupport.stream;
 
-public final class Utils {
+final class Utils {
 
     static final String EXCEPTION_MESSAGE = "Unsupported operation";
     static final String STATEMENT_DELIMITER = ";";
@@ -227,7 +228,61 @@ public final class Utils {
         return new SQLRuntimeException(messages.toString().trim(), true);
     }
 
-//    @SuppressWarnings("SynchronizationOnLocalVariableOrMethodParameter")
+    @SafeVarargs
+    static <T extends Throwable> void collectAndThrow(TryRunnable<T>... actions) {
+        if (actions != null && actions.length > 0) {
+            List<Throwable> exceptions = new ArrayList<>();
+            for (TryRunnable<T> action : actions) {
+                try {
+                    action.run();
+                } catch (Throwable t) {
+                    exceptions.add(t);
+                }
+            }
+            if (!exceptions.isEmpty()) {
+                throw newSQLRuntimeException(exceptions.toArray(new Throwable[0]));
+            }
+        }
+    }
+
+    static <T> T doInTransaction(
+            TrySupplier<Connection, SQLException> connectionSupplier,
+            TransactionIsolation isolationLevel,
+            TryConsumer<Connection, SQLException> beforeStart,
+            TryFunction<Connection, T, SQLException> action,
+            TryConsumer<Connection, SQLException> onCommit
+    ) throws SQLException {
+        Connection conn = connectionSupplier.get();
+        AtomicBoolean autoCommit = new AtomicBoolean(true);
+        Savepoint savepoint = null;
+        int isolation = conn.getTransactionIsolation();
+        T result;
+        try {
+            beforeStart.compose(connection -> {
+                if (isolationLevel != null && isolation != isolationLevel.level) {
+                    if (!conn.getMetaData().supportsTransactionIsolationLevel(isolationLevel.level)) {
+                        throw new SQLException(format("Unsupported transaction isolation level: '%s'", isolationLevel.name()));
+                    }
+                    conn.setTransactionIsolation(isolationLevel.level);
+                }
+                autoCommit.set(conn.getAutoCommit());
+                conn.setAutoCommit(false);
+            }).accept(conn);
+            result = action.apply(conn);
+        } catch (SQLException e) {
+            conn.rollback(savepoint);
+            conn.releaseSavepoint(savepoint);
+            throw e;
+        } finally {
+            onCommit.andThen(connection -> {
+                conn.setAutoCommit(autoCommit.get());
+                conn.setTransactionIsolation(isolation);
+            }).accept(conn);
+        }
+        return result;
+    }
+
+    //    @SuppressWarnings("SynchronizationOnLocalVariableOrMethodParameter")
     static <T> T doInTransaction(boolean forceClose, TrySupplier<Connection, SQLException> connectionSupplier, TransactionIsolation isolationLevel, TryFunction<Connection, T, SQLException> action) throws SQLException {
         Connection conn = connectionSupplier.get();
         boolean autoCommit = true;
@@ -240,7 +295,7 @@ public final class Utils {
             savepoint = conn.setSavepoint();
             if (isolationLevel != null && isolation != isolationLevel.level) {
                 if (!conn.getMetaData().supportsTransactionIsolationLevel(isolationLevel.level)) {
-                    throw new IllegalArgumentException(format("Unsupported transaction isolation level: '%s'", isolationLevel.name()));
+                    throw new SQLException(format("Unsupported transaction isolation level: '%s'", isolationLevel.name()));
                 }
                 conn.setTransactionIsolation(isolationLevel.level);
             }
@@ -260,6 +315,7 @@ public final class Utils {
         }
     }
 
+    // TODO retain SQL hints comments: /*+ */
     static String cutComments(String query) {
         String replaced = query.concat("\r\n").replaceAll("(--).*\\s", ""); // single line comments cut
         // multiline comments cut
@@ -342,6 +398,17 @@ public final class Utils {
                         throw newSQLRuntimeException(e);
                     }
                 });
+    }
+
+    @Nonnull
+    static <T> T wrap(T instance, Class<T> into) {
+        return wrap(instance, into, (source, proxy, method, args) -> method.invoke(source, args));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Nonnull
+    static <T> T wrap(Object instance, Class<T> into, TryQuadFunction<T, Object, Method, Object[], Object, Throwable> handler) {
+        return (T) newProxyInstance(requireNonNull(instance, "Instance must be provided").getClass().getClassLoader(), new Class<?>[]{into}, (proxy, method, args) -> handler.apply((T) instance, proxy, method, args));
     }
 
 }

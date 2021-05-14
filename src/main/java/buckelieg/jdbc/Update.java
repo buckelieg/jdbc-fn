@@ -62,7 +62,7 @@ public interface Update extends Query {
      * @see java.sql.Connection#prepareStatement(String, int) (where <code>int</code> is of <code>Statement.RETURN_GENERATED_KEYS</code>)
      */
     @Nonnull
-    <T, K> T execute(TryFunction<ResultSet, K, SQLException> valueMapper, TryFunction<Stream<K>, T, SQLException> generatedValuesHandler);
+    <T> Stream<T> execute(TryFunction<ResultSet, T, SQLException> generatedValuesMapper);
 
     /**
      * Executes an update query providing generated results
@@ -84,7 +84,7 @@ public interface Update extends Query {
      * @see java.sql.Connection#prepareStatement(String, String[])
      */
     @Nonnull
-    <T, K> T execute(TryFunction<ResultSet, K, SQLException> valueMapper, TryFunction<Stream<K>, T, SQLException> generatedValuesHandler, String... colNames);
+    <T> Stream<T> execute(TryFunction<ResultSet, T, SQLException> generatedValuesMapper, String... colNames);
 
     /**
      * Executes an update query providing generated results
@@ -97,16 +97,16 @@ public interface Update extends Query {
      *      1
      * )}</pre>
      *
-     * @param valueMapper generated values <code>ResultSet</code> mapper function
-     * @param generatedValuesHandler handler which operates on {@link ResultSet} with generated values
+     * @param generatedValuesMapper generated values <code>ResultSet</code> mapper function
+     * @param generatedValuesMapper handler which operates on {@link ResultSet} with generated values
      * @param colIndices             indices of the columns with generated keys
-     * @return an arbitrary result from  <code>generatedValuesHandler</code> function
+     * @return a {@link Stream} of elements arbitrary result from  <code>generatedValuesHandler</code> function
      * @throws NullPointerException     if colIndices or generatedValuesHandler or valueMapper is null
      * @throws IllegalArgumentException if colIndices is empty
      * @see java.sql.Connection#prepareStatement(String, int[])
      */
     @Nonnull
-    <T, K> T execute(TryFunction<ResultSet, K, SQLException> valueMapper, TryFunction<Stream<K>, T, SQLException> generatedValuesHandler, int... colIndices);
+    <T> Stream<T> execute(TryFunction<ResultSet, T, SQLException> generatedValuesMapper, int... colIndices);
 
     /**
      * Tells this update will be a large update

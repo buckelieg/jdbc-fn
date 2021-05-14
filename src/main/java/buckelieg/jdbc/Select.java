@@ -508,7 +508,6 @@ public interface Select extends Query {
     }
 
 
-
     /**
      * Executes SELECT statement for SINGLE result with default mapper applied
      *
@@ -741,6 +740,37 @@ public interface Select extends Query {
     @Nonnull
     default Select print() {
         return print(System.out::println);
+    }
+
+    /**
+     * Performs an action for each element of this stream
+     *
+     * <p>This is a terminal operation
+     *
+     * @param action an action to perform on the elements
+     */
+    void forEach(TryTriConsumer<ResultSet, Integer, Metadata, SQLException> action);
+
+    /**
+     * Performs an action for each element of this stream
+     *
+     * <p>This is a terminal operation
+     *
+     * @param action an action to perform on the elements
+     */
+    default void forEach(TryBiConsumer<ResultSet, Metadata, SQLException> action) {
+        forEach((rs, i, meta) -> action.accept(rs, meta));
+    }
+
+    /**
+     * Performs an action for each element of this stream
+     *
+     * <p>This is a terminal operation
+     *
+     * @param action an action to perform on the elements
+     */
+    default void forEach(TryConsumer<ResultSet, SQLException> action) {
+        forEach((rs, meta) -> action.accept(rs));
     }
 
 }

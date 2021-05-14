@@ -29,6 +29,8 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -120,8 +122,8 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     private final Map<String, String> columnNamesMappings = new HashMap<>();
     protected final AtomicReference<Metadata> meta = new AtomicReference<>();
 
-    SelectQuery(Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, TrySupplier<Connection, SQLException> connectionSupplier, String query, Object... params) {
-        super(conveyor, connectionSupplier, query, params);
+    SelectQuery(Lock lock, Condition condition, boolean isTransactionRunning, Executor conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, TrySupplier<Connection, SQLException> connectionSupplier, @Nullable TryRunnable<SQLException> onCompleted, String query, Object... params) {
+        super(lock, condition, isTransactionRunning, conveyor, connectionSupplier, onCompleted, query, params);
         this.metaCache = metaCache;
     }
 
@@ -437,26 +439,29 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
     @Override
     public final <T> Stream<T> execute(TryTriFunction<ResultSet, Integer, Metadata, T, SQLException> mapper) {
         requireNonNull(mapper, "Mapper must be provided");
-        if (rs != null && hasMoved && !hasNext) return empty();
-        return runSync(() -> StreamSupport.stream(jdbcTry(() -> {
-            statement = prepareStatement();
-            setPoolable();
-            setEscapeProcessing();
-            setTimeout();
-            statement.setFetchSize(fetchSize); // 0 value is ignored by Statement.setFetchSize;
-            if (maxRowsInt != -1) {
-                statement.setMaxRows(maxRowsInt);
-            }
-            if (maxRowsLong != -1L) {
-                statement.setLargeMaxRows(maxRowsLong);
-            }
-            doExecute();
-            if (rs != null) {
-                wrapper = new ImmutableResultSet(rs);
-                meta.set(new RSMeta(connectionInUse, rs, metaCache));
-            }
-            return this;
-        }), false).map(rs -> jdbcTry(() -> mapper.apply(wrapper, currentResultSetNumber, meta.get()))).onClose(this::close));
+        return runSync(() -> {
+            if (rs != null && hasMoved && !hasNext) return empty();
+            return StreamSupport.stream(jdbcTry(() -> {
+                statement = prepareStatement();
+                setPoolable();
+                setEscapeProcessing();
+                setTimeout();
+                statement.setFetchSize(fetchSize); // 0 value is ignored by Statement.setFetchSize;
+                if (maxRowsInt != -1) {
+                    statement.setMaxRows(maxRowsInt);
+                }
+                if (maxRowsLong != -1L) {
+                    statement.setLargeMaxRows(maxRowsLong);
+                }
+                connectionInUse.setAutoCommit(false);
+                doExecute();
+                if (rs != null) {
+                    wrapper = new ImmutableResultSet(rs);
+                    meta.set(new RSMeta(connectionInUse, rs, metaCache));
+                }
+                return this;
+            }), false).map(rs -> jdbcTry(() -> mapper.apply(wrapper, currentResultSetNumber, meta.get()))).onClose(this::close);
+        });
     }
 
     protected void doExecute() throws SQLException {
@@ -554,16 +559,14 @@ class SelectQuery extends AbstractQuery<Statement> implements Iterable<ResultSet
         }
     }
 
-/*    @Override
-    public void close() {
-        try {
-            connection.setAutoCommit(autoCommit);
-        } catch (SQLException e) {
-            throw newSQLRuntimeException(e);
-        } finally {
-            super.close();
-        }
-    }*/
+    @Override
+    public void forEach(TryTriConsumer<ResultSet, Integer, Metadata, SQLException> action) {
+        requireNonNull(action, "Action must be provided");
+        execute((rs, index, meta) -> {
+            action.accept(rs, index, meta);
+            return null;
+        }).forEach(nil -> {});
+    }
 
     protected Statement prepareStatement() throws SQLException {
         connectionInUse = connectionSupplier.get();

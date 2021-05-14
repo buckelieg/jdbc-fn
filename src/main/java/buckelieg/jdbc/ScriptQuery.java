@@ -29,6 +29,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
@@ -62,6 +64,8 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
     private boolean skipWarnings = true;
     private boolean poolable;
     private Consumer<SQLException> errorHandler = NOOP;
+    private final Lock lock;
+    private final Condition condition;
 
     /**
      * Creates script executor query
@@ -70,7 +74,9 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
      * @param script     an arbitrary SQL script to execute
      * @throws IllegalArgumentException in case of corrupted script (like illegal comment lines encountered)
      */
-    ScriptQuery(ExecutorService conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, TrySupplier<Connection, SQLException> connectionSupplier, String script, @Nullable Iterable<T> namedParams) {
+    ScriptQuery(Lock lock, Condition condition, ExecutorService conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, TrySupplier<Connection, SQLException> connectionSupplier, String script, @Nullable Iterable<T> namedParams) {
+        this.lock = lock;
+        this.condition = condition;
         this.conveyor = conveyor;
         this.metaCache = metaCache;
         this.connectionSupplier = connectionSupplier;
@@ -111,13 +117,13 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
             for (String query : script.split(STATEMENT_DELIMITER)) {
                 try {
                     if (isAnonymous(query)) {
-                        executeQuery(new QueryImpl(conveyor, () -> conn, query));
+                        executeQuery(new QueryImpl(lock, condition, conveyor, () -> conn, query));
                     } else {
                         Map.Entry<String, Object[]> preparedQuery = prepareQuery(query, params);
                         if (isProcedure(preparedQuery.getKey())) {
-                            new StoredProcedureQuery(conveyor, metaCache, () -> conn, preparedQuery.getKey(), stream(preparedQuery.getValue()).map(p -> p instanceof P ? (P<?>) p : P.in(p)).toArray(P[]::new)).skipWarnings(skipWarnings).print(this::log).call();
+                            new StoredProcedureQuery(lock, condition, true, conveyor, metaCache, () -> conn, null, preparedQuery.getKey(), stream(preparedQuery.getValue()).map(p -> p instanceof P ? (P<?>) p : P.in(p)).toArray(P[]::new)).skipWarnings(skipWarnings).print(this::log).call();
                         } else {
-                            executeQuery(new QueryImpl(conveyor, () -> conn, preparedQuery.getKey(), preparedQuery.getValue()));
+                            executeQuery(new QueryImpl(lock, condition, conveyor, () -> conn, preparedQuery.getKey(), preparedQuery.getValue()));
                         }
                     }
                 } catch (Exception e) {

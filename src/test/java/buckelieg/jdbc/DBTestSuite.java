@@ -24,7 +24,10 @@ import org.junit.Test;
 
 import javax.sql.DataSource;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
@@ -50,6 +53,22 @@ public class DBTestSuite {
 
     @BeforeClass
     public static void init() throws Exception {
+        Files.walkFileTree(Paths.get("test"), new SimpleFileVisitor<Path>(){
+            @Override
+            public FileVisitResult visitFile(Path path, BasicFileAttributes attrs) throws IOException {
+                Files.delete(path);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                if (exc != null) {
+                    throw exc;
+                }
+                Files.delete(dir);
+                return FileVisitResult.CONTINUE;
+            }
+        });
         Class.forName("org.apache.derby.jdbc.EmbeddedDriver");
         conn = DriverManager.getConnection("jdbc:derby:memory:test;create=true");
         EmbeddedDataSource ds = new EmbeddedDataSource();
@@ -69,7 +88,7 @@ public class DBTestSuite {
         conn.createStatement().execute("CREATE FUNCTION GETROWBYID(id INTEGER) RETURNS TABLE (id INTEGER, name VARCHAR(255)) PARAMETER STYLE DERBY_JDBC_RESULT_SET READS SQL DATA LANGUAGE JAVA EXTERNAL NAME 'buckelieg.jdbc.DerbyStoredProcedures.testProcedureGetRowById'");
 //        db = new DB(() -> conn);
 //        db = new DB(conn);
-        db = new DB(ds::getConnection);
+        db = new DB(ds);
 
     }
 
@@ -417,43 +436,51 @@ public class DBTestSuite {
                 .print(s -> assertEquals("{call CREATETESTROW2(IN:=new_name(JAVA_OBJECT))}", s))
                 .execute().count();
         db.script("SELECT * FROM TEST WHERE name=:name", new SimpleImmutableEntry<>("name", "name_2"))
-                .print(s -> assertEquals("SELECT * FROM TEST WHERE name=name_2", s));
+                .print(s -> assertEquals("SELECT * FROM TEST WHERE name=name_2", s))
+                .execute();
     }
 
     @Test
     public void testUpdateWithGeneratedKeys() throws Exception {
-        Long id = db.update("INSERT INTO test(name) VALUES(?)", "name").print().execute(
-                rs -> rs.getLong(1),
-                keys -> db.select("SELECT * FROM test WHERE id=?", keys.max(Comparator.comparing(i -> i)).orElse(-1L)).print().single(rs -> rs.getLong(1))
-        ).orElse(0L);
+        Long id = db.select(
+                "SELECT * FROM test WHERE id=?",
+                db.update("INSERT INTO test(name) VALUES(?)", "name")
+                        .print()
+                        .execute(rs -> rs.getLong(1))
+                        .max(Comparator.comparing(i -> i))
+                        .orElse(-1L)
+        ).print().single(rs -> rs.getLong(1)).orElse(0L);
         assertEquals(11L, id.longValue());
-        id = db.update("INSERT INTO test(name) VALUES(?)", "name").print().execute(
-                rs -> rs.getLong(1),
-                keys -> db.select("SELECT * FROM test WHERE id=?", keys.max(Comparator.comparing(i -> i)).orElse(-1L)).print().single(rs -> rs.getLong(1)),
-                1
-        ).orElse(0L);
+        id = db.select(
+                "SELECT * FROM test WHERE id=?",
+                db.update("INSERT INTO test(name) VALUES(?)", "name")
+                        .print()
+                        .execute(rs -> rs.getLong(1), 1)
+                        .max(Comparator.comparing(i -> i)).orElse(-1L)
+        ).print().single(rs -> rs.getLong(1)).orElse(0L);
         assertEquals(12L, id.longValue());
-        id = db.update("INSERT INTO test(name) VALUES(?)", "name").print().execute(
-                rs -> rs.getLong(1),
-                keys -> db.select("SELECT * FROM test WHERE id=?", keys.max(Comparator.comparing(i -> i)).orElse(-1L)).print().single(rs -> rs.getLong(1)),
-                "ID"
-        ).orElse(0L);
+        id = db.select(
+                "SELECT * FROM test WHERE id=?",
+                db.update("INSERT INTO test(name) VALUES(?)", "name")
+                        .print()
+                        .execute(rs -> rs.getLong(1), "ID")
+                        .max(Comparator.comparing(i -> i)).orElse(-1L)
+        ).print().single(rs -> rs.getLong(1)).orElse(0L);
         assertEquals(13L, id.longValue());
     }
 
     @Test
     public void testTransactions() throws Exception {
         Long result = db.transaction(false, TransactionIsolation.SERIALIZABLE, db ->
-                db.update("INSERT INTO test(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
+                db.select("SELECT * FROM test WHERE id=?",
+                        db.update("INSERT INTO test(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
                         .batch(true)
                         .skipWarnings(false)
                         .timeout(1, TimeUnit.MINUTES)
                         .print()
-                        .execute(
-                                rs -> rs.getLong(1),
-                                keys -> db.select("SELECT * FROM test WHERE id=?", keys.peek(key -> db.procedure("call ECHO(?)", key).call()).max(Comparator.comparing(i -> i)).orElse(-1L)).print().single(rs -> rs.getLong(1))
-                        )
-                        .orElse(null)
+                        .execute(rs -> rs.getLong(1))
+                        .peek(key -> db.procedure("call ECHO(?)", key).call()).max(Comparator.comparing(i -> i)).orElse(-1L)
+                ).print().single(rs -> rs.getLong(1)).orElse(null)
         );
         System.out.println(db.select("SELECT * FROM test WHERE id=?", result).print().single());
         assertEquals(Long.valueOf(13L), result);
@@ -465,6 +492,8 @@ public class DBTestSuite {
         try {
             db.transaction(false, TransactionIsolation.SERIALIZABLE, db -> {
                 db.update("INSERT INTO test(name) VALUES(?)", "name").execute();
+                Long countAfter = db.select("SELECT COUNT(*) FROM TEST").single(rs -> rs.getLong(1)).orElse(null);
+                assertEquals(countBefore + 1, (long) countAfter);
                 throw new SQLException("Rollback!");
             });
         } catch (Throwable t) {
@@ -479,21 +508,20 @@ public class DBTestSuite {
     public void testNoNewConnectionSupplierWithTransaction() throws Exception {
         Connection conn = ds.getConnection();
         DB db = new DB(() -> conn);
-        db.transaction(db1 -> db1.transaction(true, db2 -> null));
+        db.transaction(db1 -> db.transaction(true, db2 -> null));
     }
 
     @Test
     public void testNestedTransactions() throws Exception {
         List<String> list = db.transaction(db1 -> {
-            assertEquals(db, db1);
-            List<String> list1 = db1.update("INSERT INTO test(name) VALUES(?)", "new_name").execute(
-                    rs -> rs.getLong(1),
-                    ids -> db1.transaction(db2 -> db2.select("SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry<>("ids", ids.collect(toList()))).list(rs -> rs.getString(1)))
-            );
+            List<String> list1 = db.transaction(
+                    db2 -> db2.select("SELECT name FROM TEST WHERE id IN (:ids)",
+                            new SimpleImmutableEntry<>("ids", db1.update("INSERT INTO test(name) VALUES(?)", "new_name").print().execute(rs -> rs.getLong(1)).collect(toList()))
+                    ).print().list(rs -> rs.getString(1)));
             assertNotNull(list1);
             assertEquals(1L, list1.size());
             assertEquals("new_name", list1.iterator().next());
-            return db1.transaction(true, db2 -> db2.transaction(true, db3 -> db3.select("SELECT * FROM TEST").list(rs -> rs.getString(1))));
+            return db.transaction(true, db2 -> db.transaction(true, db3 -> db3.select("SELECT * FROM TEST").print().list(rs -> rs.getString(1))));
         });
         assertNotNull(list);
         assertEquals(11L, list.size());
@@ -567,6 +595,7 @@ public class DBTestSuite {
     }
 
     @Test
+//    @Ignore
     public void testQueries() throws Exception {
         assertEquals(1, Queries.list(conn, rs -> rs.getString(2), "SELECT * FROM TEST WHERE id=?", 1).size());
         assertEquals(1, Queries.single(conn, rs -> rs.getInt(1), "SELECT COUNT(*) FROM TEST WHERE id=?", 1).orElse(0).intValue());
@@ -681,9 +710,28 @@ public class DBTestSuite {
 
     @Test
     public void testParallelSelect() throws Exception {
-        ExecutorService service = Executors.newFixedThreadPool(2);
+        ExecutorService service = Executors.newFixedThreadPool(1);
+        Select shared = db.select("SELECT * FROM TEST");
         service.execute(() -> db.select("SELECT * FROM TEST").print(sql -> System.out.println(Thread.currentThread().getName() + " " + sql)).list());
+        service.execute(shared::list);
+        service.execute(() -> db.transaction(true, db -> db.select("SELECT * FROM TEST").print(sql -> System.out.println(Thread.currentThread().getName() + " " + sql)).list()));
+        service.execute(shared::list);
+        service.execute(() -> {
+            db.select("SELECT * FROM TEST").print(sql -> System.out.println(Thread.currentThread().getName() + " " + sql)).list();
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        });
         service.execute(() -> db.select("SELECT * FROM TEST").print(sql -> System.out.println(Thread.currentThread().getName() + " " + sql)).list());
+        service.execute(shared::list);
+        service.execute(() -> db.transaction(true, db -> db.select("SELECT * FROM TEST").print(sql -> System.out.println(Thread.currentThread().getName() + " " + sql)).list()));
+        service.execute(() -> db.select("SELECT * FROM TEST").print(sql -> System.out.println(Thread.currentThread().getName() + " " + sql)).list());
+        service.execute(shared::list);
+        service.execute(() -> db.select("SELECT * FROM TEST").print(sql -> System.out.println(Thread.currentThread().getName() + " " + sql)).list());
+        service.execute(shared::list);
+        service.execute(shared::list);
         service.shutdown();
         service.awaitTermination(5, TimeUnit.MINUTES);
     }

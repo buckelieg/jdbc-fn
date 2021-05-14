@@ -15,6 +15,7 @@
  */
 package buckelieg.jdbc;
 
+import buckelieg.jdbc.fn.TryConsumer;
 import buckelieg.jdbc.fn.TryFunction;
 import buckelieg.jdbc.fn.TrySupplier;
 
@@ -27,11 +28,13 @@ import java.io.File;
 import java.nio.charset.Charset;
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.*;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiFunction;
 
 import static buckelieg.jdbc.Utils.*;
@@ -59,22 +62,40 @@ import static java.util.stream.Stream.of;
 @ParametersAreNonnullByDefault
 public final class DB implements AutoCloseable {
 
-    private volatile Connection connection;
+    private final Lock lock = new ReentrantLock();
+    private final Condition condition = lock.newCondition();
+
+    private Connection connection;
     private final TrySupplier<Connection, SQLException> connectionSupplier;
     private ExecutorService conveyor;
     private boolean shutdownConveyor = true;
+    private Boolean canCreateNewConnection = null;
     private final ConcurrentMap<String, RSMeta.Column> metaCache;
+    private TryConsumer<Connection, SQLException> onCommit;
+    private boolean isTransactionRunning = false;
 
     DB(Connection connection) {
         this(() -> connection);
+        this.canCreateNewConnection = false;
     }
 
-    private DB(ExecutorService conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, Connection connection, TrySupplier<Connection, SQLException> connectionSupplier) {
+    private DB(
+            ExecutorService conveyor,
+            ConcurrentMap<String, RSMeta.Column> metaCache,
+            Connection connection,
+            TrySupplier<Connection, SQLException> connectionSupplier,
+            boolean isTransactionRunning,
+            Boolean canCreate,
+            TryConsumer<Connection, SQLException> onCommit
+    ) {
         this.connection = connection;
         this.connectionSupplier = connectionSupplier;
         this.conveyor = conveyor;
         this.metaCache = metaCache;
         this.shutdownConveyor = false;
+        this.canCreateNewConnection = canCreate;
+        this.isTransactionRunning = isTransactionRunning;
+        this.onCommit = onCommit;
     }
 
     /**
@@ -87,7 +108,7 @@ public final class DB implements AutoCloseable {
     public DB(TrySupplier<Connection, SQLException> connectionSupplier) {
         requireNonNull(connectionSupplier, "Connection supplier must be provided");
         this.connectionSupplier = connectionSupplier;
-        this.conveyor = Executors.newCachedThreadPool();
+        this.conveyor = getConveyor();
         this.metaCache = new ConcurrentHashMap<>();
     }
 
@@ -100,6 +121,7 @@ public final class DB implements AutoCloseable {
      */
     public DB(DataSource ds) {
         this(ds::getConnection);
+        this.canCreateNewConnection = true;
     }
 
     /**
@@ -109,25 +131,21 @@ public final class DB implements AutoCloseable {
      */
     @Override
     public void close() {
-        List<Throwable> exceptions = new ArrayList<>();
-        try {
-            if (connection != null) connection.close();
-        } catch (SQLException e) {
-            exceptions.add(e);
-        }
-        if (conveyor != null && shutdownConveyor) {
-            conveyor.shutdown();
-            try {
-                conveyor.awaitTermination(1, TimeUnit.MINUTES);
-            } catch (InterruptedException e) {
-                exceptions.add(e);
-            }
-        }
-        if (!exceptions.isEmpty()) {
-            throw newSQLRuntimeException(exceptions.toArray(new Throwable[0]));
-        }
+        collectAndThrow(
+                () -> {
+                    if (connection != null && !connection.isClosed()) {
+                        connection.close();
+                        connection = null;
+                    }
+                },
+                () -> {
+                    if (conveyor != null && shutdownConveyor) {
+                        conveyor.shutdown();
+                        conveyor.awaitTermination(1, TimeUnit.MINUTES);
+                    }
+                }
+        );
     }
-
 
     /**
      * Executes an arbitrary parameterized SQL statement
@@ -174,7 +192,7 @@ public final class DB implements AutoCloseable {
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Nonnull
     public final Script script(String script, Map<String, ?> namedParameters) {
-        return new ScriptQuery(getConveyor(), metaCache, getConnectionSupplier(false), cutComments(requireNonNull(script, "SQL script must be provided")), namedParameters.entrySet());
+        return new ScriptQuery(lock, condition, getConveyor(), metaCache, getConnectionSupplier(false), cutComments(requireNonNull(script, "SQL script must be provided")), namedParameters.entrySet());
     }
 
     /**
@@ -190,7 +208,7 @@ public final class DB implements AutoCloseable {
     @SafeVarargs
     @Nonnull
     public final <T extends Entry<String, ?>> Script script(String script, T... namedParameters) {
-        return new ScriptQuery(getConveyor(), metaCache, getConnectionSupplier(false), cutComments(requireNonNull(script, "SQL script must be provided")), asList(namedParameters));
+        return new ScriptQuery(lock, condition, getConveyor(), metaCache, getConnectionSupplier(false), cutComments(requireNonNull(script, "SQL script must be provided")), asList(namedParameters));
     }
 
     /**
@@ -294,7 +312,13 @@ public final class DB implements AutoCloseable {
                 );
             }
         }
-        return new StoredProcedureQuery(getConveyor(), metaCache, getConnectionSupplier(false), query, parameters);
+//        String finalQuery = query;
+        return new StoredProcedureQuery(lock, condition, isTransactionRunning, getConveyor(), metaCache, getConnectionSupplier(false), () -> {
+            if (!isTransactionRunning) {
+                connection.setAutoCommit(true);
+            }
+//            System.out.printf("onCompleted DB.procedure: %s%n", finalQuery);
+        }, query, parameters);
     }
 
     /**
@@ -325,7 +349,12 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid select statement", query));
         }
-        return new SelectQuery(getConveyor(), metaCache, getConnectionSupplier(false), checkAnonymous(checkSingle(query)), parameters);
+        return new SelectQuery(lock, condition, isTransactionRunning, getConveyor(), metaCache, getConnectionSupplier(false), () -> {
+            if (!isTransactionRunning) {
+                connection.setAutoCommit(true);
+            }
+//            System.out.printf("onCompleted DB.select: %s%n", query);
+        }, checkAnonymous(checkSingle(query)), parameters);
     }
 
 
@@ -344,7 +373,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid DML statement", query));
         }
-        return new UpdateQuery(getConveyor(), getConnectionSupplier(false), checkAnonymous(checkSingle(query)), batch);
+        return new UpdateQuery(lock, condition, isTransactionRunning, getConveyor(), getConnectionSupplier(false), checkAnonymous(checkSingle(query)), batch);
     }
 
     /**
@@ -361,7 +390,7 @@ public final class DB implements AutoCloseable {
         if (isProcedure(query)) {
             throw new IllegalArgumentException(format("Query '%s' is not valid SQL statement", query));
         }
-        return new QueryImpl(getConveyor(), getConnectionSupplier(false), checkAnonymous(checkSingle(query)), parameters);
+        return new QueryImpl(lock, condition, getConveyor(), getConnectionSupplier(false), checkAnonymous(checkSingle(query)), parameters);
     }
 
     /**
@@ -556,7 +585,13 @@ public final class DB implements AutoCloseable {
     @Nullable
     private <T> T doInTransaction(boolean createNew, @Nullable TransactionIsolation level, TryFunction<DB, T, SQLException> action) {
         try {
-            return Utils.doInTransaction(createNew && connection != null, getConnectionSupplier(createNew), level, conn -> requireNonNull(action, "Action must be provided").apply(createNew && connection != null ? new DB(getConveyor(), metaCache, conn, connectionSupplier) : this));
+            return Utils.doInTransaction(
+                    createNew && connection != null, getConnectionSupplier(createNew), level,
+                    conn -> requireNonNull(action, "Action must be provided").apply(new DB(
+                            getConveyor(), metaCache, conn, connectionSupplier, true, canCreateNewConnection,
+                            onCommit == null ? Connection::commit : c -> onCommit.compose(Connection::commit).accept(c)
+                    ))
+            );
         } catch (SQLException e) {
             throw newSQLRuntimeException(e);
         }
@@ -583,21 +618,36 @@ public final class DB implements AutoCloseable {
         return () -> {
             if (forceNew) {
                 synchronized (this) {
-                    Connection newConnection = requireNonNull(connectionSupplier.get(), "Connection supplier must provide a connection");
-                    if (connection != null && connection == newConnection) {
-                        throw new UnsupportedOperationException("No new connection created");
-                    }
-                    if (newConnection.isClosed()) {
-                        throw new SQLException("Provided connection is already closed");
-                    }
-                    connection = newConnection;
-                }
-            } else if (connection == null || connection.isClosed()) {
-                synchronized (this) {
-                    if (connection == null || connection.isClosed()) {
+                    if (canCreateNewConnection != null && canCreateNewConnection) {
                         connection = requireNonNull(connectionSupplier.get(), "Connection supplier must provide a connection");
-                        if (connection.isClosed()) {
-                            throw new SQLException("Provided connection is already closed");
+                        System.out.printf("Opening new connection(canCreateNewConnection != null && canCreateNewConnection): %s%n", connection);
+                    } else {
+                        if (canCreateNewConnection == null) {
+                            Connection newConnection = requireNonNull(connectionSupplier.get(), "Connection supplier must provide a connection");
+                            System.out.printf("Opening new connection(canCreateNewConnection == null): %s%n", newConnection);
+                            if (connection != null && connection == newConnection) {
+                                canCreateNewConnection = false;
+                                throw new UnsupportedOperationException("No new connection created");
+                            }
+                            if (newConnection.isClosed()) {
+                                throw new SQLException("Provided connection is already closed");
+                            }
+                            canCreateNewConnection = true;
+                            connection = newConnection;
+                        } else {
+                            throw new UnsupportedOperationException("No new connection created");
+                        }
+                    }
+                }
+            } else {
+                if (connection == null || connection.isClosed()) {
+                    synchronized (this) {
+                        if (connection == null || connection.isClosed()) {
+                            connection = requireNonNull(connectionSupplier.get(), "Connection supplier must provide a connection");
+                            System.out.printf("Opening new connection(connection == null || connection.isClosed()): %s%n", connection);
+                            if (connection.isClosed()) {
+                                throw new SQLException("Provided connection is already closed");
+                            }
                         }
                     }
                 }
