@@ -610,7 +610,7 @@ public final class DB implements AutoCloseable {
     }
 
     private <T extends Query> T prepare(String query, Iterable<? extends Entry<String, ?>> namedParams, BiFunction<String, Object[], T> toQuery) {
-        Entry<String, Object[]> preparedQuery = prepareQuery(query, namedParams);
+        Entry<String, Object[]> preparedQuery = prepareQuery(cutComments(query), namedParams);
         return toQuery.apply(preparedQuery.getKey(), preparedQuery.getValue());
     }
 

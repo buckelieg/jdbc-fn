@@ -42,6 +42,7 @@ import static java.util.Collections.singletonList;
 import static java.util.Objects.requireNonNull;
 import static java.util.Optional.empty;
 import static java.util.Optional.ofNullable;
+import static java.util.regex.Pattern.compile;
 import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Stream.of;
@@ -51,13 +52,16 @@ final class Utils {
 
     static final String EXCEPTION_MESSAGE = "Unsupported operation";
     static final String STATEMENT_DELIMITER = ";";
-    static final Pattern PARAMETER = Pattern.compile("\\?");
+    static final Pattern PARAMETER = compile("\\?");
     private static final String NAMED_PARAMETER_TRAIL = "(?=(([^\"']*\"'){2})*[^\"']*$)";
-    static final Pattern NAMED_PARAMETER = Pattern.compile(format("%s%s", "(:\\w*\\b)", NAMED_PARAMETER_TRAIL));
-    private static final Pattern STATEMENT_DELIMITER_PATTERN = Pattern.compile(format("%s%s+", STATEMENT_DELIMITER, NAMED_PARAMETER_TRAIL));
+    static final Pattern NAMED_PARAMETER = compile(format("%s%s", "(:\\w*\\b)", NAMED_PARAMETER_TRAIL));
+    private static final Pattern STATEMENT_DELIMITER_PATTERN = compile(format("%s%s+", STATEMENT_DELIMITER, NAMED_PARAMETER_TRAIL));
+    private static final Pattern MULTILINE_COMMENT_DELIMITER = compile("'[^']*'|(/\\*)|(\\*/)*");
+    private static final String MULTILINE_COMMENT_DELIMITER_START = "/*";
+    private static final String MULTILINE_COMMENT_DELIMITER_END = "*/";
 
     // Java regexp does not support conditional regexps. We will enumerate all possible variants.
-    static final Pattern STORED_PROCEDURE = Pattern.compile(format("%s|%s|%s|%s|%s|%s",
+    static final Pattern STORED_PROCEDURE = compile(format("%s|%s|%s|%s|%s|%s",
             "(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*(\\(\\s*)\\)",
             "(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*((\\(\\s*)\\?\\s*)(,\\s*\\?)*\\)",
             "(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+",
@@ -148,10 +152,6 @@ final class Utils {
             return mapper.apply(input);
         }
     }
-
-    private static final Pattern MULTILINE_COMMENT_DELIMITER = Pattern.compile("(/\\*)|(\\*/)*");
-    private static final String MULTILINE_COMMENT_DELIMITER_START = "/*";
-    private static final String MULTILINE_COMMENT_DELIMITER_END = "*/";
 
     private Utils() {
         throw new UnsupportedOperationException();
@@ -333,10 +333,10 @@ final class Utils {
             }
         }
         if (startIndices.size() != endIndices.size()) {
-            throw new SQLRuntimeException("Multiline comments open/close tags count mismatch");
+            throw new SQLRuntimeException(format("Multiline comments open/close tags count mismatch (%s/%s) for query '%s'", startIndices.size(), endIndices.size(), query), true);
         }
         if (!startIndices.isEmpty() && (startIndices.get(0) > endIndices.get(0))) {
-            throw new SQLRuntimeException(format("Unmatched start multiline comment at %s", startIndices.get(0)));
+            throw new SQLRuntimeException(format("Unmatched start multiline comment at %s for query '%s'", startIndices.get(0), query), true);
         }
         for (int i = 0; i < startIndices.size(); i++) {
             replaced = replaced.replace(replaced.substring(startIndices.get(i), endIndices.get(i)), format("%" + (endIndices.get(i) - startIndices.get(i)) + "s", " "));

@@ -14,3 +14,6 @@ SELECT * FROM DUAL*/
 INSERT INTO TEST(name) VALUES('whatever');
 
 SELECT 1 AS "TEST     TEST" FROM TEST; -- TODO preserve whitespaces inside double-quoted elements
+
+
+SELECT TO_CHAR(RTRIM(XMLAGG(XMLELEMENT(e, TO_CLOB('') || TO_CHAR(id) || ', ')).EXTRACT('*/text()').getClobVal(), ', ')) FROM DUAL;

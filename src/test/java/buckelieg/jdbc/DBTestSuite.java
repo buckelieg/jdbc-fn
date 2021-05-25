@@ -16,6 +16,7 @@
 package buckelieg.jdbc;
 
 import buckelieg.jdbc.fn.TryConsumer;
+import buckelieg.jdbc.fn.TryFunction;
 import org.apache.derby.jdbc.EmbeddedDataSource;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -39,6 +40,7 @@ import static buckelieg.jdbc.Utils.*;
 import static java.lang.Thread.currentThread;
 import static java.util.AbstractMap.SimpleImmutableEntry;
 import static java.util.Collections.singletonList;
+import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.toList;
 import static org.junit.Assert.*;
@@ -53,7 +55,7 @@ public class DBTestSuite {
 
     @BeforeClass
     public static void init() throws Exception {
-        Files.walkFileTree(Paths.get("test"), new SimpleFileVisitor<Path>(){
+        Files.walkFileTree(Paths.get("test"), new SimpleFileVisitor<Path>() {
             @Override
             public FileVisitResult visitFile(Path path, BasicFileAttributes attrs) throws IOException {
                 Files.delete(path);
@@ -273,6 +275,11 @@ public class DBTestSuite {
         db.select("SELECT * FROM TEST WHERE 1=1 AND (NAME IN (:names) OR NAME=:names)", new SimpleImmutableEntry<>("names", "name_1"), new SimpleImmutableEntry<>("names", "name_2"));
     }
 
+    @Test(expected = Throwable.class)
+    public void testSameNamedParameter() throws Throwable { // TODO derby bug?
+        assertEquals(1, db.select("SELECT * FROM TEST WHERE 1=1 AND (ID = (CAST ? AS NUMBER)/* OR ID = (CAST :p2 AS NUMBER)*/)", 1/*, new SimpleImmutableEntry<>("p2", 1)*/).print().list().size());
+    }
+
     @Test
     public void testVoidStoredProcedure() throws Throwable {
         db.procedure("{call CREATETESTROW2(?)}", "new_name").call();
@@ -400,16 +407,21 @@ public class DBTestSuite {
 
     @Test
     public void testScriptEliminateComments() throws Exception {
-        System.out.println(
-                cutComments(
-                        new BufferedReader(
-                                new InputStreamReader(
-                                        Objects.requireNonNull(currentThread().getContextClassLoader().getResourceAsStream("script.sql"))
-                                )
-                        ).lines().collect(joining("\r\n"))
-                )
-        );
-        // TODO perform script test here
+        TryFunction<String, String, Exception> readFile = file -> {
+            try (BufferedReader r = new BufferedReader(
+                    new InputStreamReader(
+                            requireNonNull(currentThread().getContextClassLoader().getResourceAsStream(file))
+                    )
+            )) {
+                return r.lines().collect(joining("\r\n"));
+            }
+        };
+        assertEquals(cutComments(readFile.apply("script_in.sql")), readFile.apply("script_out.sql"));
+    }
+
+    @Test
+    public void testEliminateComments() throws Exception {
+        System.out.println(cutComments("SELECT TO_CHAR(RTRIM(XMLAGG(XMLELEMENT(e, TO_CLOB('') || TO_CHAR(id) || ', ')).EXTRACT('*/text()').getClobVal(), ', ')) FROM DUAL"));
     }
 
     @Test(expected = SQLRuntimeException.class)
@@ -474,12 +486,12 @@ public class DBTestSuite {
         Long result = db.transaction(false, TransactionIsolation.SERIALIZABLE, db ->
                 db.select("SELECT * FROM test WHERE id=?",
                         db.update("INSERT INTO test(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
-                        .batch(true)
-                        .skipWarnings(false)
-                        .timeout(1, TimeUnit.MINUTES)
-                        .print()
-                        .execute(rs -> rs.getLong(1))
-                        .peek(key -> db.procedure("call ECHO(?)", key).call()).max(Comparator.comparing(i -> i)).orElse(-1L)
+                                .batch(true)
+                                .skipWarnings(false)
+                                .timeout(1, TimeUnit.MINUTES)
+                                .print()
+                                .execute(rs -> rs.getLong(1))
+                                .peek(key -> db.procedure("call ECHO(?)", key).call()).max(Comparator.comparing(i -> i)).orElse(-1L)
                 ).print().single(rs -> rs.getLong(1)).orElse(null)
         );
         System.out.println(db.select("SELECT * FROM test WHERE id=?", result).print().single());
