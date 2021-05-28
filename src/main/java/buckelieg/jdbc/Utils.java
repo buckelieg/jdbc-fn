@@ -385,27 +385,22 @@ final class Utils {
             }
         }
         if (multiLineCommentStartIndices.size() != multiLineCommentsEndIndices.size()) {
-            throw new SQLRuntimeException(
-                    format(
-                            "Multiline comments open/close tags count mismatch (%s/%s)  at index %s for query:\r\n%s",
-                            multiLineCommentStartIndices.size(),
-                            multiLineCommentsEndIndices.size(),
-//                            startIndices.size() > endIndices.size() ? startIndices.get(endIndices.get(endIndices.size() - 1)) : endIndices.get(startIndices.get(startIndices.size() - 1)),
-                            "", query
-                    ),
-                    true
-            );
+            throw new SQLRuntimeException(format("Multiline comments open/close tags count mismatch (%s/%s) for query:\r\n%s", multiLineCommentStartIndices.size(), multiLineCommentsEndIndices.size(), query), true);
         }
         if (!multiLineCommentStartIndices.isEmpty() && (multiLineCommentStartIndices.get(0) > multiLineCommentsEndIndices.get(0))) {
             throw new SQLRuntimeException(format("Unmatched start multiline comment at %s for query:\r\n%s", multiLineCommentStartIndices.get(0), query), true);
         }
-        for (int i = 0; i < singleLineCommentStartIndices.size(); i++) {
-            replaced = replaced.replace(replaced.substring(singleLineCommentStartIndices.get(i), singleLineCommentEndIndices.get(i)), format("%" + (singleLineCommentEndIndices.get(i) - singleLineCommentStartIndices.get(i)) + "s", " "));
-        }
-        for (int i = 0; i < multiLineCommentStartIndices.size(); i++) {
-            replaced = replaced.replace(replaced.substring(multiLineCommentStartIndices.get(i), multiLineCommentsEndIndices.get(i)), format("%" + (multiLineCommentsEndIndices.get(i) - multiLineCommentStartIndices.get(i)) + "s", " "));
-        }
+        replaced = replaceChars(replaced, singleLineCommentStartIndices, singleLineCommentEndIndices);
+        replaced = replaceChars(replaced, multiLineCommentStartIndices, multiLineCommentsEndIndices);
         return replaced.replaceAll("(\\s){2,}", " ").trim();
+    }
+
+    private static String replaceChars(String source, List<Integer> startIndices, List<Integer> endIndices) {
+        String replaced = source;
+        for (int i = 0; i < startIndices.size(); i++) {
+            replaced = replaced.replace(replaced.substring(startIndices.get(i), endIndices.get(i)), format("%" + (endIndices.get(i) - startIndices.get(i)) + "s", " "));
+        }
+        return replaced;
     }
 
     static String checkSingle(String query) {
