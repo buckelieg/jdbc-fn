@@ -1,9 +1,14 @@
+
+
+
+
+
 /*
 this is an SQL comments eliminator test script
 */
 SELECT * FROM TEST;
 SELECT /*ignore this*/ * FROM TEST t1/* WHERE /*nested com
-ment here */ id = 1*/ /*;*/ JOIN TEST2  t2 ON t1.id = t2.id;
+ment here */* id = 1*/ /*;*/ JOIN TEST2  t2 ON t1.id = t2.id;
 
 /*
 SELECT * FROM DUAL*/
@@ -17,3 +22,4 @@ SELECT 1 AS "TEST     TEST" FROM TEST; -- TODO preserve whitespaces inside doubl
 
 
 SELECT TO_CHAR(RTRIM(XMLAGG(XMLELEMENT(e, TO_CLOB('') || TO_CHAR(id) || ', ')).EXTRACT('*/text()').getClobVal(), ', ')) FROM DUAL;
+SELECT TO_CHAR(RTRIM(XMLAGG(XMLELEMENT(e, TO_CLOB('') || TO_CHAR(id) || ', ')).EXTRACT('--/text()').getClobVal(), ', ')) FROM DUAL;

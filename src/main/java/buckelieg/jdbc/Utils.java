@@ -30,7 +30,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -53,12 +52,9 @@ final class Utils {
     static final String EXCEPTION_MESSAGE = "Unsupported operation";
     static final String STATEMENT_DELIMITER = ";";
     static final Pattern PARAMETER = compile("\\?");
-    private static final String NAMED_PARAMETER_TRAIL = "(?=(([^\"']*\"'){2})*[^\"']*$)";
-    static final Pattern NAMED_PARAMETER = compile(format("%s%s", "(:\\w*\\b)", NAMED_PARAMETER_TRAIL));
-    private static final Pattern STATEMENT_DELIMITER_PATTERN = compile(format("%s%s+", STATEMENT_DELIMITER, NAMED_PARAMETER_TRAIL));
-    private static final Pattern MULTILINE_COMMENT_DELIMITER = compile("'[^']*'|(/\\*)|(\\*/)*");
-    private static final String MULTILINE_COMMENT_DELIMITER_START = "/*";
-    private static final String MULTILINE_COMMENT_DELIMITER_END = "*/";
+    private static final String QUOTATION_ESCAPE = "(?=(([^\"']*\"'){2})*[^\"']*$)";
+    static final Pattern NAMED_PARAMETER = compile(format("(:\\w*\\b)%s", QUOTATION_ESCAPE));
+    private static final Pattern STATEMENT_DELIMITER_PATTERN = compile(format("%s%s+", STATEMENT_DELIMITER, QUOTATION_ESCAPE));
 
     // Java regexp does not support conditional regexps. We will enumerate all possible variants.
     static final Pattern STORED_PROCEDURE = compile(format("%s|%s|%s|%s|%s|%s",
@@ -93,7 +89,7 @@ final class Utils {
         defaultReaders.put(CHAR, ResultSet::getString);
         defaultReaders.put(LONGVARCHAR, (input, index) -> {
             try (BufferedReader r = new BufferedReader(input.getCharacterStream(index))) {
-                return r.lines().collect(Collectors.joining("\r\n"));
+                return r.lines().collect(joining("\r\n"));
             } catch (Throwable t) {
                 throw newSQLRuntimeException(t);
             }
@@ -173,7 +169,7 @@ final class Utils {
         }
         for (Entry<String, Optional<?>> e : transformedParams.entrySet()) {
             query = query.replaceAll(
-                    format("(%s\\b)%s", e.getKey(), NAMED_PARAMETER_TRAIL),
+                    format("(%s\\b)%s", e.getKey(), QUOTATION_ESCAPE),
                     stream(asIterable(e.getValue()).spliterator(), false).map(o -> "?").collect(joining(","))
             );
         }
@@ -317,29 +313,97 @@ final class Utils {
 
     // TODO retain SQL hints comments: /*+ */
     static String cutComments(String query) {
-        String replaced = query.concat("\r\n").replaceAll("(--).*\\s", ""); // single line comments cut
-        // multiline comments cut
-        List<Integer> startIndices = new ArrayList<>();
-        List<Integer> endIndices = new ArrayList<>();
-        Matcher matcher = MULTILINE_COMMENT_DELIMITER.matcher(replaced);
-        while (matcher.find()) {
-            String delimiter = matcher.group();
-            if (!delimiter.isEmpty()) {
-                if (MULTILINE_COMMENT_DELIMITER_START.equals(delimiter)) {
-                    startIndices.add(matcher.start());
-                } else if (MULTILINE_COMMENT_DELIMITER_END.equals(delimiter)) {
-                    endIndices.add(matcher.end());
+        int queryIndex = -4;
+        String replaced = query.replaceAll("\\R", "\r\n");
+        List<Integer> singleLineCommentStartIndices = new ArrayList<>();
+        List<Integer> singleLineCommentEndIndices = new ArrayList<>();
+        List<Integer> multiLineCommentStartIndices = new ArrayList<>();
+        List<Integer> multiLineCommentsEndIndices = new ArrayList<>();
+        boolean isInsideComment = false;
+        boolean isInsideQuotes = false;
+        boolean isSingleLineComment = false;
+        boolean isInnerComment = false;
+        Character outerQuote = null;
+        for (String line : replaced.split("\r\n")) {
+            queryIndex = queryIndex + 3;
+            if (line.isEmpty()) {
+                queryIndex--;
+                continue;
+            }
+            for (int i = 1; i < line.length(); i++) {
+                ++queryIndex;
+                char prev = line.charAt(i - 1);
+                char cur = line.charAt(i);
+                if (isInsideQuotes) {
+                    if ('\'' == prev || '"' == prev) {
+                        if (outerQuote != null && outerQuote.equals(prev)) {
+                            isInsideQuotes = false;
+                            outerQuote = null;
+                        }
+                    }
+                    continue;
+                }
+                if (isInsideComment) {
+                    if (isSingleLineComment) continue;
+                    if (!isInnerComment && ('*' == cur && '/' == prev)) {
+                        isInnerComment = true;
+                        continue;
+                    }
+                    if ('*' == prev && '/' == cur) {
+                        multiLineCommentsEndIndices.add(queryIndex + 2);
+                        isInnerComment = false;
+                        isInsideComment = false;
+                        continue;
+                    }
+                } else {
+                    if ('-' == cur && '-' == prev) {
+                        singleLineCommentStartIndices.add(queryIndex);
+                        isInsideComment = true;
+                        isSingleLineComment = true;
+                        continue;
+                    }
+                    if ('*' == cur && '/' == prev) {
+                        isInsideComment = true;
+                        multiLineCommentStartIndices.add(queryIndex);
+                        continue;
+                    }
+                    if ('*' == prev && '/' == cur) {
+                        multiLineCommentsEndIndices.add(queryIndex + 2);
+                        isInsideComment = false;
+                        continue;
+                    }
+                }
+                if ('\'' == prev || '"' == prev) {
+                    isInsideQuotes = true;
+                    outerQuote = prev;
                 }
             }
+            if (isInsideComment && isSingleLineComment) {
+                singleLineCommentEndIndices.add(queryIndex + 2);
+                isSingleLineComment = false;
+                isInsideComment = false;
+            }
         }
-        if (startIndices.size() != endIndices.size()) {
-            throw new SQLRuntimeException(format("Multiline comments open/close tags count mismatch (%s/%s) for query '%s'", startIndices.size(), endIndices.size(), query), true);
+        if (multiLineCommentStartIndices.size() != multiLineCommentsEndIndices.size()) {
+            throw new SQLRuntimeException(
+                    format(
+                            "Multiline comments open/close tags count mismatch (%s/%s)  at index %s for query:\r\n%s",
+                            multiLineCommentStartIndices.size(),
+                            multiLineCommentsEndIndices.size(),
+//                            startIndices.size() > endIndices.size() ? startIndices.get(endIndices.get(endIndices.size() - 1)) : endIndices.get(startIndices.get(startIndices.size() - 1)),
+                            "", query
+                    ),
+                    true
+            );
         }
-        if (!startIndices.isEmpty() && (startIndices.get(0) > endIndices.get(0))) {
-            throw new SQLRuntimeException(format("Unmatched start multiline comment at %s for query '%s'", startIndices.get(0), query), true);
+        if (!multiLineCommentStartIndices.isEmpty() && (multiLineCommentStartIndices.get(0) > multiLineCommentsEndIndices.get(0))) {
+            throw new SQLRuntimeException(format("Unmatched start multiline comment at %s for query:\r\n%s", multiLineCommentStartIndices.get(0), query), true);
         }
-        for (int i = 0; i < startIndices.size(); i++) {
-            replaced = replaced.replace(replaced.substring(startIndices.get(i), endIndices.get(i)), format("%" + (endIndices.get(i) - startIndices.get(i)) + "s", " "));
+        for (int i = 0; i < singleLineCommentStartIndices.size(); i++) {
+            replaced = replaced.replace(replaced.substring(singleLineCommentStartIndices.get(i), singleLineCommentEndIndices.get(i)), format("%" + (singleLineCommentEndIndices.get(i) - singleLineCommentStartIndices.get(i)) + "s", " "));
+        }
+        for (int i = 0; i < multiLineCommentStartIndices.size(); i++) {
+            replaced = replaced.replace(replaced.substring(multiLineCommentStartIndices.get(i), multiLineCommentsEndIndices.get(i)), format("%" + (multiLineCommentsEndIndices.get(i) - multiLineCommentStartIndices.get(i)) + "s", " "));
         }
         return replaced.replaceAll("(\\s){2,}", " ").trim();
     }

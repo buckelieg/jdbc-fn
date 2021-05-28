@@ -406,22 +406,29 @@ public class DBTestSuite {
     }
 
     @Test
-    public void testScriptEliminateComments() throws Exception {
+    public void testEliminateComments() throws Exception {
         TryFunction<String, String, Exception> readFile = file -> {
             try (BufferedReader r = new BufferedReader(
-                    new InputStreamReader(
-                            requireNonNull(currentThread().getContextClassLoader().getResourceAsStream(file))
-                    )
+                    new InputStreamReader(requireNonNull(currentThread().getContextClassLoader().getResourceAsStream(file)))
             )) {
                 return r.lines().collect(joining("\r\n"));
             }
         };
-        assertEquals(cutComments(readFile.apply("script_in.sql")), readFile.apply("script_out.sql"));
-    }
-
-    @Test
-    public void testEliminateComments() throws Exception {
-        System.out.println(cutComments("SELECT TO_CHAR(RTRIM(XMLAGG(XMLELEMENT(e, TO_CLOB('') || TO_CHAR(id) || ', ')).EXTRACT('*/text()').getClobVal(), ', ')) FROM DUAL"));
+        String testCase1_in = "SELECT TO_CHAR(RTRIM(XMLAGG(XMLELEMENT(e, TO_CLOB('') || TO_CHAR(id) || ', ')).EXTRACT('*/text()').getClobVal(), ', ')) FROM DUAL";
+        String testCase2_in = "SELECT TO_CHAR(RTRIM(XMLAGG(XMLELEMENT(e, TO_CLOB('') || TO_CHAR(id) || ', ')).EXTRACT('*/text()').getClobVal(), ', ')) AS \"/**/\" FROM DUAL";
+        String testCase3_in = "SELECT TO_CHAR(RTRIM(XMLAGG(/*XMLELEMENT*/(e, TO_CLOB('') || TO_CHAR(id) || ', ')).EXTRACT('*/text()').getClobVal(), ', ')) AS \"/* whatever-label */\" FROM DUAL";
+        String testCase3_out = "SELECT TO_CHAR(RTRIM(XMLAGG( (e, TO_CLOB('') || TO_CHAR(id) || ', ')).EXTRACT('*/text()').getClobVal(), ', ')) AS \"/* whatever-label */\" FROM DUAL";
+        String testCase4_in = "SELECT TO_CHAR(RTRIM(XMLAGG(XMLELEMENT(e, TO_CLOB('') || TO_CHAR(id) || ', ')).EXTRACT('*/text()').getClobVal(), ', ')) AS \"/*--*/\" FROM DUAL";
+        String testCase5_in = "-- \"/*\r\n--*//SELECT TO_CHAR(RTRIM(XMLAGG(XMLELEMENT(e, TO_CLOB('') || TO_CHAR(id) || ', ')).EXTRACT('*/text()').getClobVal(), ', ')) AS \"/*--*/\" FROM DUAL";
+        String testCase6_in = "SELECT TO_CHAR(RTRIM(XMLAGG(XMLELEMENT(e, TO_CLOB('') || --TO_CHAR(id) || ', ')).EXTRACT('--/text()').getClobVal(), ', ')) FROM DUAL";
+        String testCase6_out = "SELECT TO_CHAR(RTRIM(XMLAGG(XMLELEMENT(e, TO_CLOB('') ||";
+        assertEquals(testCase1_in, cutComments(testCase1_in));
+        assertEquals(testCase2_in, cutComments(testCase2_in));
+        assertEquals(testCase3_out, cutComments(testCase3_in));
+        assertEquals(testCase4_in, cutComments(testCase4_in));
+        assertEquals("", cutComments(testCase5_in));
+        assertEquals(testCase6_out, cutComments(testCase6_in));
+        assertEquals(readFile.apply("script_out.sql"), cutComments(readFile.apply("script_in.sql")));
     }
 
     @Test(expected = SQLRuntimeException.class)
