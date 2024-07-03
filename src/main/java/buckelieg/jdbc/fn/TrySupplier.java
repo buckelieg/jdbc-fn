@@ -1,5 +1,5 @@
 /*
- * Copyright 2016- Anatoly Kutyakov
+ * Copyright 2024- Anatoly Kutyakov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,10 +41,10 @@ public interface TrySupplier<O, E extends Throwable> {
      *
      * @param trySupplier a supplier function
      * @return lambda as {@link TrySupplier} reference
-     * @throws NullPointerException if trySupplier is null
+     * @throws NullPointerException if <code>trySupplier</code> is null
      */
     static <O, E extends Throwable> TrySupplier<O, E> of(TrySupplier<O, E> trySupplier) {
-        return requireNonNull(trySupplier);
+        return requireNonNull(trySupplier, "Supplier must be provided");
     }
 
 }

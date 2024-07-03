@@ -15,7 +15,8 @@
  */
 package buckelieg.jdbc;
 
-import org.apache.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -26,10 +27,10 @@ import static java.sql.DriverManager.getConnection;
 
 public class DerbyStoredProcedures {
 
-    private static final Logger LOG = Logger.getLogger(DerbyStoredProcedures.class);
+    private static final Logger log = LogManager.getLogger(DerbyStoredProcedures.class);
 
     public static void createTestRow(String name, ResultSet[] updatedContents, ResultSet[] anotherContent) throws SQLException {
-        LOG.debug("Calling createTestRow...");
+        log.debug("Calling createTestRow...");
         PreparedStatement stmt;
         try (Connection conn = getConnection("jdbc:default:connection")) {
             stmt = conn.prepareStatement("INSERT INTO TEST(name) VALUES(?)");
@@ -42,13 +43,13 @@ public class DerbyStoredProcedures {
             updatedContents[0] = stmt.executeQuery();
             anotherContent[0] = conn.prepareStatement("SELECT * FROM TEST WHERE ID IN(1,2)").executeQuery();
         } catch (SQLException e) {
-            e.printStackTrace();
+            log.error(e.getMessage(), e);
             throw e;
         }
     }
 
     public static void testProcedure(String name) throws SQLException {
-        LOG.debug("Calling testProcedure...");
+        log.debug("Calling testProcedure...");
         try (Connection conn = getConnection("jdbc:default:connection"); PreparedStatement stmt = conn.prepareStatement("INSERT INTO TEST(name) VALUES(?)")) {
             stmt.setString(1, name);
             stmt.executeUpdate();
@@ -56,11 +57,11 @@ public class DerbyStoredProcedures {
     }
 
     public static void echoProcedure(int id) throws SQLException {
-        LOG.debug(String.format("echoProcedure(%s)", id));
+        log.debug("echoProcedure({})", id);
     }
 
     public static void testProcedureWithResults(int id, String[] name) throws SQLException {
-        LOG.debug("Calling testProcedureWithResults...");
+        log.debug("Calling testProcedureWithResults...");
         try (Connection conn = getConnection("jdbc:default:connection"); PreparedStatement stmt = conn.prepareStatement("SELECT NAME FROM TEST WHERE ID=?")) {
             stmt.setInt(1, id);
             ResultSet rs = stmt.executeQuery();
@@ -70,22 +71,22 @@ public class DerbyStoredProcedures {
     }
 
     public static void testNoArgProcedure(ResultSet[] names) throws SQLException {
-        LOG.debug("Calling testNoArgProcedure...");
+        log.debug("Calling testNoArgProcedure...");
         try (Connection conn = getConnection("jdbc:default:connection")) {
             names[0] = conn.prepareStatement("SELECT name FROM TEST").executeQuery();
         } catch (SQLException e) {
-            e.printStackTrace();
+            log.error(e.getMessage(), e);
             throw e;
         }
     }
 
     public static ResultSet testProcedureGetAllRows() throws SQLException {
-        LOG.debug("Calling testProcedureGetAllRows...");
+        log.debug("Calling testProcedureGetAllRows...");
         return getConnection("jdbc:default:connection").prepareStatement("SELECT * FROM TEST").executeQuery();
     }
 
     public static ResultSet testProcedureGetRowById(int id) throws SQLException {
-        LOG.debug("Calling testProcedureGetRowById...");
+        log.debug("Calling testProcedureGetRowById...");
         Connection conn = getConnection("jdbc:default:connection");
         PreparedStatement stmt = conn.prepareStatement("SELECT * FROM TEST WHERE id=?");
         stmt.setInt(1, id);

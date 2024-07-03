@@ -1,6 +1,19 @@
+/*
+ * Copyright 2024- Anatoly Kutyakov
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package buckelieg.jdbc.fn;
-
-import java.util.Objects;
 
 import static java.util.Objects.requireNonNull;
 
@@ -19,7 +32,7 @@ import static java.util.Objects.requireNonNull;
 public interface TryTriFunction<I1, I2, I3, O, E extends Throwable> {
 
     /**
-     * Represents some three-argument function which might throw an Exception
+     * Represents a three-argument function which might throw an Exception
      *
      * @param input1 first argument
      * @param input2 second argument
@@ -41,10 +54,10 @@ public interface TryTriFunction<I1, I2, I3, O, E extends Throwable> {
      * @return a composed function that first applies this function and then
      * applies the {@code after} function
      * @throws E                    an exception
-     * @throws NullPointerException if after is null
+     * @throws NullPointerException if <code>after</code> is null
      */
     default <R> TryTriFunction<I1, I2, I3, R, E> andThen(TryFunction<? super O, ? extends R, E> after) throws E {
-        Objects.requireNonNull(after);
+        if (null == after) throw new NullPointerException("after Function must be provided");
         return (I1 input1, I2 input2, I3 input3) -> after.apply(apply(input1, input2, input3));
     }
 
@@ -53,10 +66,10 @@ public interface TryTriFunction<I1, I2, I3, O, E extends Throwable> {
      *
      * @param tryTriFunction a function
      * @return lambda as {@link TryTriFunction} reference
-     * @throws NullPointerException if tryTriFunction is null
+     * @throws NullPointerException if <code>tryTriFunction</code> is null
      */
     static <I1, I2, I3, O, E extends Throwable> TryTriFunction<I1, I2, I3, O, E> of(TryTriFunction<I1, I2, I3, O, E> tryTriFunction) {
-        return requireNonNull(tryTriFunction);
+        return requireNonNull(tryTriFunction, "Function must be provided");
     }
 
 }

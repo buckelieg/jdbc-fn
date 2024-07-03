@@ -1,5 +1,5 @@
 /*
- * Copyright 2016- Anatoly Kutyakov
+ * Copyright 2024- Anatoly Kutyakov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 package buckelieg.jdbc.fn;
-
-import java.util.Objects;
 
 import static java.util.Objects.requireNonNull;
 
@@ -33,7 +31,7 @@ import static java.util.Objects.requireNonNull;
 public interface TryBiFunction<I1, I2, O, E extends Throwable> {
 
     /**
-     * Represents some two-argument function which might throw an Exception
+     * Represents a two-argument function which might throw an Exception
      *
      * @param input1 first argument
      * @param input2 second argument
@@ -54,10 +52,10 @@ public interface TryBiFunction<I1, I2, O, E extends Throwable> {
      * @return a composed function that first applies this function and then
      * applies the {@code after} function
      * @throws E                    an exception
-     * @throws NullPointerException if after is null
+     * @throws NullPointerException if <code>after</code>> is null
      */
     default <R> TryBiFunction<I1, I2, R, E> andThen(TryFunction<? super O, ? extends R, E> after) throws E {
-        Objects.requireNonNull(after);
+        if(null == after) throw new NullPointerException("after Function must be provided");
         return (I1 input1, I2 input2) -> after.apply(apply(input1, input2));
     }
 
@@ -66,10 +64,10 @@ public interface TryBiFunction<I1, I2, O, E extends Throwable> {
      *
      * @param tryBiFunction a function
      * @return lambda as {@link TryBiFunction} reference
-     * @throws NullPointerException if tryBiFunction is null
+     * @throws NullPointerException if <code>tryBiFunction</code> is null
      */
     static <I1, I2, O, E extends Throwable> TryBiFunction<I1, I2, O, E> of(TryBiFunction<I1, I2, O, E> tryBiFunction) {
-        return requireNonNull(tryBiFunction);
+        return requireNonNull(tryBiFunction, "Function must be provided");
     }
 
 }

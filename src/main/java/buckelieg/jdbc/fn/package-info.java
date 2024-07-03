@@ -1,5 +1,5 @@
 /*
- * Copyright 2016- Anatoly Kutyakov
+ * Copyright 2024- Anatoly Kutyakov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
  * <br/>Function collection to be used in conjunction with main classes
  *
  * @see buckelieg.jdbc.fn.TryRunnable
+ * @see buckelieg.jdbc.fn.TrySupplier
  * @see buckelieg.jdbc.fn.TryConsumer
  * @see buckelieg.jdbc.fn.TryBiConsumer
  * @see buckelieg.jdbc.fn.TryTriConsumer
@@ -25,8 +26,8 @@
  * @see buckelieg.jdbc.fn.TryFunction
  * @see buckelieg.jdbc.fn.TryBiFunction
  * @see buckelieg.jdbc.fn.TryTriFunction
+ * @see buckelieg.jdbc.fn.TryQuadFunction
  * @see buckelieg.jdbc.fn.TryPredicate
  * @see buckelieg.jdbc.fn.TryBiPredicate
- * @see buckelieg.jdbc.fn.TrySupplier
  */
 package buckelieg.jdbc.fn;

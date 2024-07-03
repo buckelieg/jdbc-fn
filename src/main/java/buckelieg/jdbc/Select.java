@@ -20,19 +20,17 @@ import buckelieg.jdbc.fn.*;
 import javax.annotation.Nonnull;
 import javax.annotation.ParametersAreNonnullByDefault;
 import javax.annotation.concurrent.NotThreadSafe;
-import java.io.PrintStream;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.*;
-import java.util.concurrent.TimeUnit;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
-import java.util.stream.Collector;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static buckelieg.jdbc.Utils.*;
 import static java.util.Optional.ofNullable;
-import static java.util.stream.Collectors.toList;
 
 /**
  * An abstraction for SELECT statement
@@ -40,737 +38,329 @@ import static java.util.stream.Collectors.toList;
 @SuppressWarnings("unchecked")
 @NotThreadSafe
 @ParametersAreNonnullByDefault
-public interface Select extends Query {
-
-    /**
-     * An abstraction for <code>INSERT</code> action being performed on {@link ResultSet} object
-     * <br/>Simple usage example:
-     * <pre>{@code
-     *  DB db = new DB(ds);
-     *  // suppose we have to insert new user name in the corresponding table
-     *  if(db.select("SELECT * FROM USERS").forInsert(rs -> rs.getString("name"), (name, rs) -> rs.updateString("name", name)).single("new_user")) {
-     *      // user successfully inserted - do necessary things to process middleware logic
-     *  } else {
-     *      // reject user and halt imaginary business process logic (e.g. like user registration)
-     *  }
-     * }</pre>
-     *
-     * @param <T> inserted item type
-     */
-    @NotThreadSafe
-    @ParametersAreNonnullByDefault
-    interface ForInsert<T> {
-
-        /**
-         * Insert a single non-null item
-         *
-         * @param item an item to insert
-         * @return true if the item was successfully inserted, false - otherwise
-         * @throws NullPointerException if item is null
-         */
-        boolean single(T item);
-
-        /**
-         * Executes this <code>INSERT</code> action which is performed on a {@link ResultSet} object obtained via provided <code>SELECT</code> statement
-         *
-         * @param toInsert a collection of items to insert
-         * @return an updated {@link Stream} of items (which includes inserted items)
-         * @throws NullPointerException if provided collection is null
-         * @see ResultSet#insertRow()
-         */
-        @Nonnull
-        Stream<T> execute(Collection<T> toInsert);
-
-        /**
-         * An alias for {@link #execute(Collection)} method
-         *
-         * @param toInsert a collection of items to insert
-         * @return an updated {@link Stream} of items (which includes inserted items)
-         * @throws NullPointerException if provided collection is null
-         * @see #execute(Collection)
-         */
-        @Nonnull
-        default Stream<T> stream(Collection<T> toInsert) {
-            return execute(toInsert);
-        }
-
-        /**
-         * Shorthand for stream mapping for list
-         *
-         * @param toInsert a collection of items to insert
-         * @return a {@link List} of updated items (which includes inserted items)
-         * @throws NullPointerException if provided collection is null
-         * @see #execute(Collection)
-         * @see Stream#collect(Collector)
-         * @see java.util.stream.Collectors#toList
-         */
-        @Nonnull
-        default List<T> list(Collection<T> toInsert) {
-            return execute(toInsert).collect(toList());
-        }
-
-        /**
-         * An item inserted event handler (executes in a separate thread)
-         *
-         * @param handler a handler to be invoked whenever the item is inserted
-         * @return an abstraction for <code>INSERT</code> action being performed on {@link ResultSet} object
-         * @throws NullPointerException if provided handler is null
-         */
-        @Nonnull
-        ForInsert<T> onInserted(Consumer<T> handler);
-
-        /**
-         * @param logger item {@link String} representation consumer
-         * @return an abstraction for <code>INSERT</code> action being performed on {@link ResultSet} object
-         * @throws NullPointerException if provided logger is null
-         */
-        @Nonnull
-        ForInsert<T> verbose(Consumer<String> logger);
-
-        /**
-         * @return an abstraction for <code>INSERT</code> action being performed on {@link ResultSet} object
-         * @see #verbose(Consumer)
-         * @see System#out
-         * @see PrintStream#println(String)
-         */
-        @Nonnull
-        default ForInsert<T> verbose() {
-            return verbose(System.out::println);
-        }
-    }
-
-    /**
-     * An abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
-     * <br/>Simple usage example:
-     * <pre>{@code
-     *  DB db = new DB(ds);
-     *  // suppose we have to update user details in the corresponding table
-     *  if(db.select("SELECT * FROM USERS").forUpdate(rs -> rs.getDate("last_logon_time"), (oldDate, newDate, rs) -> if(newDate.after(oldDate)) rs.updateTimestamp("last_logon_time", newDate)).single(new Date())) {
-     *      // user successfully logged on - do necessary things to process middleware logic
-     *  } else {
-     *      // it seems that user has logged in somewhere in the future...
-     *  }
-     * }</pre>
-     *
-     * @param <T> updated item type
-     */
-    @NotThreadSafe
-    @ParametersAreNonnullByDefault
-    interface ForUpdate<T> {
-
-        /**
-         * Update a single non-null item
-         *
-         * @param item an item to update
-         * @return true if the item was successfully updated, false - otherwise
-         * @throws NullPointerException if item is null
-         */
-        boolean single(T item);
-
-        /**
-         * Executes this <code>UPDATE</code> action which is performed on a {@link ResultSet} object obtained via provided <code>SELECT</code> statement
-         *
-         * @param toUpdate a collection of items to update with
-         * @return an updated {@link Stream} of items
-         * @throws NullPointerException if provided collection is null
-         */
-        @Nonnull
-        Stream<T> execute(Collection<T> toUpdate);
-
-        /**
-         * An alias for {@link #execute(Collection)} method
-         *
-         * @param toUpdate a collection of items to update with
-         * @return an updated {@link Stream} of items
-         * @throws NullPointerException if provided collection is null
-         */
-        @Nonnull
-        default Stream<T> stream(Collection<T> toUpdate) {
-            return execute(toUpdate);
-        }
-
-        /**
-         * Shorthand for stream mapping for list
-         *
-         * @param toUpdate a collection of items to update with
-         * @return an updated {@link List} of items
-         * @throws NullPointerException if provided collection is null
-         * @see #execute(Collection)
-         * @see Stream#collect(Collector)
-         * @see java.util.stream.Collectors#toList
-         */
-        @Nonnull
-        default List<T> list(Collection<T> toUpdate) {
-            return stream(toUpdate).collect(toList());
-        }
-
-        /**
-         * An item updated event handler (executes in a separate thread)
-         *
-         * @param handler a handler to be invoked whenever the item is updated
-         * @return an abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
-         * @throws NullPointerException if provided handler is null
-         */
-        @Nonnull
-        ForUpdate<T> onUpdated(BiConsumer<T, T> handler);
-
-        /**
-         * @param logger item {@link String} representation consumer
-         * @return an abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
-         * @throws NullPointerException if provided logger is null
-         */
-        @Nonnull
-        ForUpdate<T> verbose(Consumer<String> logger);
-
-        /**
-         * @return an abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
-         * @see #verbose(Consumer)
-         * @see System#out
-         * @see PrintStream#println(String)
-         */
-        @Nonnull
-        default ForUpdate<T> verbose() {
-            return verbose(System.out::println);
-        }
-
-    }
-
-    /**
-     * An abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
-     *
-     * @param <T> deleted item type
-     */
-    @NotThreadSafe
-    @ParametersAreNonnullByDefault
-    interface ForDelete<T> {
-
-        /**
-         * Delete a single non-null item
-         *
-         * @param item an item to delete
-         * @return true if the item was successfully deleted, false - otherwise
-         * @throws NullPointerException if item is null
-         */
-        boolean single(T item);
-
-        /**
-         * Executes this <code>DELETE</code> action which is performed on a {@link ResultSet} object obtained via provided <code>SELECT</code> statement
-         *
-         * @param toDelete a collection of items to delete
-         * @return an updated {@link Stream} of items (excluding deleted ones)
-         * @throws NullPointerException if provided collection is null
-         */
-        @Nonnull
-        Stream<T> execute(Collection<T> toDelete);
-
-        /**
-         * An alias for {@link #execute(Collection)} method
-         *
-         * @param toDelete a collection of items to delete
-         * @return an updated {@link Stream} of items (excluding deleted ones)
-         * @throws NullPointerException if provided collection is null
-         */
-        @Nonnull
-        default Stream<T> stream(Collection<T> toDelete) {
-            return execute(toDelete);
-        }
-
-        /**
-         * Shorthand for stream mapping for list
-         *
-         * @param toDelete a collection of items to delete
-         * @return an updated {@link List} of items (excluding deleted ones)
-         * @throws NullPointerException if provided collection is null
-         * @see #execute(Collection)
-         * @see Stream#collect(Collector)
-         * @see java.util.stream.Collectors#toList
-         */
-        @Nonnull
-        default List<T> list(Collection<T> toDelete) {
-            return execute(toDelete).collect(toList());
-        }
-
-        /**
-         * An item deleted event handler (executes in a separate thread)
-         *
-         * @param handler a handler to be invoked whenever the item is deleted
-         * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
-         * @throws NullPointerException if provided handler is null
-         */
-        @Nonnull
-        ForDelete<T> onDeleted(Consumer<T> handler);
-
-        /**
-         * @param logger item {@link String} representation consumer
-         * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
-         * @throws NullPointerException if provided logger is null
-         */
-        @Nonnull
-        ForDelete<T> verbose(Consumer<String> logger);
-
-        /**
-         * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
-         * @see #verbose(Consumer)
-         * @see System#out
-         * @see PrintStream#println(String)
-         */
-        @Nonnull
-        default ForDelete<T> verbose() {
-            return verbose(System.out::println);
-        }
-
-    }
-
-    /**
-     * @param mapper  a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @param updater item update function
-     * @param <T>     item type
-     * @return an abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    <T> ForUpdate<T> forUpdate(TryFunction<ResultSet, T, SQLException> mapper, TryQuadConsumer<T, T, ResultSet, Metadata, SQLException> updater);
-
-    /**
-     * @param mapper  a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @param updater item update function
-     * @param <T>     item type
-     * @return an abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    default <T> ForUpdate<T> forUpdate(TryFunction<ResultSet, T, SQLException> mapper, TryTriConsumer<T, T, ResultSet, SQLException> updater) {
-        return forUpdate(mapper, (original, updated, rs, meta) -> updater.accept(original, updated, rs));
-    }
-
-    /**
-     * @param mapper  a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @param updater item update function
-     * @param <T>     item type
-     * @return an abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    default <T> ForUpdate<T> forUpdate(TryFunction<ResultSet, T, SQLException> mapper, TryBiConsumer<T, ResultSet, SQLException> updater) {
-        return forUpdate(mapper, (original, updated, rs, meta) -> updater.accept(updated, rs));
-    }
-
-    /**
-     * @param updater item update function
-     * @return an abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    default ForUpdate<Map<String, Object>> forUpdate(TryQuadConsumer<Map<String, Object>, Map<String, Object>, ResultSet, Metadata, SQLException> updater) {
-        return forUpdate(new DefaultMapper(), updater);
-    }
-
-    /**
-     * @param updater item update function
-     * @return an abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    default ForUpdate<Map<String, Object>> forUpdate(TryTriConsumer<Map<String, Object>, Map<String, Object>, ResultSet, SQLException> updater) {
-        return forUpdate((original, updated, rs, meta) -> updater.accept(original, updated, rs));
-    }
-
-    /**
-     * @param updater item update function
-     * @return an abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    default ForUpdate<Map<String, Object>> forUpdate(TryBiConsumer<Map<String, Object>, ResultSet, SQLException> updater) {
-        return forUpdate((original, updated, rs) -> updater.accept(updated, rs));
-    }
-
-    /**
-     * @return an abstraction for <code>UPDATE</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    ForUpdate<Map<String, Object>> forUpdate();
-
-    /**
-     * @param mapper   a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @param inserter insert item function
-     * @param <T>      item type
-     * @return an abstraction for <code>INSERT</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    <T> ForInsert<T> forInsert(TryFunction<ResultSet, T, SQLException> mapper, TryTriConsumer<T, ResultSet, Metadata, SQLException> inserter);
-
-    /**
-     * @param mapper   a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @param inserter insert item function
-     * @param <T>      item type
-     * @return an abstraction for <code>INSERT</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    default <T> ForInsert<T> forInsert(TryFunction<ResultSet, T, SQLException> mapper, TryBiConsumer<T, ResultSet, SQLException> inserter) {
-        return forInsert(mapper, (row, rs, meta) -> inserter.accept(row, rs));
-    }
-
-    /**
-     * @param inserter insert item function
-     * @return an abstraction for <code>INSERT</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    default ForInsert<Map<String, Object>> forInsert(TryTriConsumer<Map<String, Object>, ResultSet, Metadata, SQLException> inserter) {
-        return forInsert(new DefaultMapper(), inserter);
-    }
-
-    /**
-     * @param inserter insert item function
-     * @return an abstraction for <code>INSERT</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    default ForInsert<Map<String, Object>> forInsert(TryBiConsumer<Map<String, Object>, ResultSet, SQLException> inserter) {
-        return forInsert((row, rs, meta) -> inserter.accept(row, rs));
-    }
-
-    /**
-     * @return an abstraction for <code>INSERT</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    ForInsert<Map<String, Object>> forInsert();
-
-    /**
-     * @param mapper       a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @param keyExtractor a function that obtains <code>PRIMARY KEY</code> from provided item
-     * @param <T>          item type
-     * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    default <T> ForDelete<T> forDelete(TryFunction<ResultSet, T, SQLException> mapper, TryFunction<T, ?, SQLException> keyExtractor) {
-        return forDelete(mapper, (row, meta) -> keyExtractor.apply(row));
-    }
-
-    /**
-     * @param mapper       a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @param keyExtractor a function that obtains <code>PRIMARY KEY</code> from provided item
-     * @param <T>          item type
-     * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    <T> ForDelete<T> forDelete(TryFunction<ResultSet, T, SQLException> mapper, TryBiFunction<T, Metadata, ?, SQLException> keyExtractor);
-
-    /**
-     * @param keyExtractor a function that obtains <code>PRIMARY KEY</code> from provided item
-     * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    default ForDelete<Map<String, Object>> forDelete(TryFunction<Map<String, Object>, ?, SQLException> keyExtractor) {
-        return forDelete((row, meta) -> keyExtractor.apply(row));
-    }
-
-    /**
-     * @param keyExtractor a function that obtains <code>PRIMARY KEY</code> from provided item
-     * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    default ForDelete<Map<String, Object>> forDelete(TryBiFunction<Map<String, Object>, Metadata, ?, SQLException> keyExtractor) {
-        return forDelete(new DefaultMapper(), keyExtractor);
-    }
-
-    /**
-     * @return an abstraction for <code>DELETE</code> action being performed on {@link ResultSet} object
-     */
-    @Nonnull
-    ForDelete<Map<String, Object>> forDelete();
-
-    /**
-     * In cases when single result of SELECT statement is expected
-     * <br/>Like <code>SELECT COUNT(*) FROM TABLE_NAME</code> etc.
-     *
-     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @throws NullPointerException if mapper is null
-     * @see #execute(TryFunction)
-     */
-    @Nonnull
-    default <T> Optional<T> single(TryFunction<ResultSet, T, SQLException> mapper) {
-        return single((rs, meta) -> mapper.apply(rs));
-    }
-
-    /**
-     * In cases when single result of SELECT statement is expected
-     * <br/>Like <code>SELECT COUNT(*) FROM TABLE_NAME</code> etc.
-     *
-     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @throws NullPointerException if mapper is null
-     * @see #execute(TryFunction)
-     */
-    @Nonnull
-    default <T> Optional<T> single(TryBiFunction<ResultSet, Metadata, T, SQLException> mapper) {
-        T result;
-        try {
-            result = fetchSize(1).maxRows(1).list((rs, i, meta) -> mapper.apply(rs, meta)).iterator().next();
-        } catch (NoSuchElementException e) {
-            result = null;
-        } catch (Exception e) {
-            throw newSQLRuntimeException(e);
-        }
-        return ofNullable(result);
-    }
-
-
-    /**
-     * Executes SELECT statement for SINGLE result with default mapper applied
-     *
-     * @return an {@link Optional} with the {@link Map} as a value
-     */
-    @Nonnull
-    default Optional<Map<String, Object>> single() {
-        return single(defaultMapper);
-    }
-
-    /**
-     * Executes this SELECT statement returning a <code>Stream</code> of mapped values as <code>Map</code>s
-     * <br/>Note:
-     * Whenever we left stream without calling some 'reduction' (terminal) operation we left resource freeing to JDBC
-     * <br/><code>stream().iterator().next()</code>
-     * <br/>Thus there could be none or some rows more, but result set (and a statement) would not be closed forcibly
-     * <br/>In such cases we rely on JDBC resources auto closing mechanism
-     * <br/>And it is strongly recommended to use {@link #single()} method for the cases above
-     *
-     * @return a {@link Stream} of {@link Map}s
-     * @see #execute(TryFunction)
-     */
-    @Nonnull
-    default Stream<Map<String, Object>> execute() {
-        return execute(new DefaultMapper());
-    }
-
-    /**
-     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @param <T>    item type
-     * @return a {@link Stream} over mapped {@link ResultSet}
-     */
-    @Nonnull
-    <T> Stream<T> execute(TryTriFunction<ResultSet, Integer, Metadata, T, SQLException> mapper);
-
-    /**
-     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @param <T>    item type
-     * @return a {@link Stream} over mapped {@link ResultSet}
-     */
-    @Nonnull
-    default <T> Stream<T> execute(TryBiFunction<ResultSet, Integer, T, SQLException> mapper) {
-        return execute((rs, i, meta) -> mapper.apply(rs, i));
-    }
-
-    /**
-     * Executes this SELECT statement returning a <code>Stream</code> of mapped values over <code>ResultSet</code> object
-     * <br/>Note:
-     * Whenever we left stream without calling some 'reduction' (terminal) operation we left resource freeing to JDBC
-     * <br/><code>stream().iterator().next()</code>
-     * <br/>Thus there could be none or some rows more, but result set (and a statement) would not be closed forcibly
-     * <br/>In such cases we rely on JDBC resources auto closing mechanism
-     * <br/>And it is strongly recommended to use {@link #single(TryFunction)} method for the cases above
-     *
-     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @return a {@link Stream} over mapped {@link ResultSet}
-     * @throws NullPointerException if mapper is null
-     * @throws SQLRuntimeException  as a wrapper for {@link SQLException}
-     * @see #execute()
-     */
-    @Nonnull
-    default <T> Stream<T> execute(TryFunction<ResultSet, T, SQLException> mapper) {
-        return execute((rs, i) -> mapper.apply(rs));
-    }
-
-    /**
-     * An alias for {@link #execute(TryBiFunction)} method
-     *
-     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @return a {@link Stream} over mapped {@link ResultSet}
-     * @see #execute(TryFunction)
-     */
-    @Nonnull
-    default <T> Stream<T> stream(TryBiFunction<ResultSet, Integer, T, SQLException> mapper) {
-        return execute(mapper);
-    }
-
-    /**
-     * An alias for {@link #execute(TryFunction)} method
-     *
-     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @return a {@link Stream} over mapped {@link ResultSet}
-     * @see #execute(TryFunction)
-     */
-    @Nonnull
-    default <T> Stream<T> stream(TryFunction<ResultSet, T, SQLException> mapper) {
-        return execute(mapper);
-    }
-
-    /**
-     * An alias for {@link #execute()} method
-     *
-     * @return a {@link Stream} of {@link Map}s
-     * @see #execute()
-     */
-    @Nonnull
-    default Stream<Map<String, Object>> stream() {
-        return execute();
-    }
-
-    /**
-     * Shorthand for stream mapping to list
-     *
-     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @return a {@link List} over mapped {@link ResultSet}
-     * @see Stream#collect(Collector)
-     * @see java.util.stream.Collectors#toList
-     */
-    @Nonnull
-    default <T> List<T> list(TryTriFunction<ResultSet, Integer, Metadata, T, SQLException> mapper) {
-        return execute(mapper).collect(toList());
-    }
-
-    /**
-     * Shorthand for stream mapping to list
-     *
-     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @return a {@link List} over mapped {@link ResultSet}
-     * @see Stream#collect(Collector)
-     * @see java.util.stream.Collectors#toList
-     */
-    @Nonnull
-    default <T> List<T> list(TryBiFunction<ResultSet, Integer, T, SQLException> mapper) {
-        return stream(mapper).collect(toList());
-    }
-
-    /**
-     * Shorthand for stream mapping to list
-     *
-     * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
-     * @return a {@link List} over mapped {@link ResultSet}
-     * @see Stream#collect(Collector)
-     * @see java.util.stream.Collectors#toList
-     */
-    @Nonnull
-    default <T> List<T> list(TryFunction<ResultSet, T, SQLException> mapper) {
-        return stream(mapper).collect(toList());
-    }
-
-    /**
-     * Shorthand for stream mapping for list
-     *
-     * @return a {@link Map} with key-value pairs
-     * @see #list(TryFunction)
-     */
-    @Nonnull
-    default List<Map<String, Object>> list() {
-        return execute().collect(toList());
-    }
-
-    /**
-     * Configures {@link java.sql.Statement} fetch size parameter
-     *
-     * @param size desired fetch size. Should be greater than 0
-     * @return select query abstraction
-     * @see java.sql.Statement#setFetchSize(int)
-     * @see ResultSet#setFetchSize(int)
-     */
-    @Nonnull
-    Select fetchSize(int size);
-
-    /**
-     * Updates max rows obtained with this query
-     *
-     * @param max rows number limit
-     * @return select query abstraction
-     * @see java.sql.Statement#setMaxRows(int)
-     */
-    @Nonnull
-    Select maxRows(int max);
-
-    /**
-     * Updates max rows obtained with this query
-     *
-     * @param max rows number limit
-     * @return select query abstraction
-     * @see java.sql.Statement#setLargeMaxRows(long)
-     */
-    @Nonnull
-    Select maxRows(long max);
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    @Nonnull
-    default Select timeout(int timeout) {
-        return timeout(timeout, TimeUnit.SECONDS);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    @Nonnull
-    Select timeout(int timeout, TimeUnit unit);
-
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    @Nonnull
-    Select poolable(boolean poolable);
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    @Nonnull
-    Select escaped(boolean escapeProcessing);
-
-    /**
-     * {@inheritDoc}
-     */
-    @Nonnull
-    @Override
-    Select skipWarnings(boolean skipWarnings);
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    @Nonnull
-    Select print(Consumer<String> printer);
-
-    /**
-     * {@inheritDoc}
-     */
-    @Nonnull
-    default Select print() {
-        return print(System.out::println);
-    }
-
-    /**
-     * Performs an action for each element of this stream
-     *
-     * <p>This is a terminal operation
-     *
-     * @param action an action to perform on the elements
-     */
-    void forEach(TryTriConsumer<ResultSet, Integer, Metadata, SQLException> action);
-
-    /**
-     * Performs an action for each element of this stream
-     *
-     * <p>This is a terminal operation
-     *
-     * @param action an action to perform on the elements
-     */
-    default void forEach(TryBiConsumer<ResultSet, Metadata, SQLException> action) {
-        forEach((rs, i, meta) -> action.accept(rs, meta));
-    }
-
-    /**
-     * Performs an action for each element of this stream
-     *
-     * <p>This is a terminal operation
-     *
-     * @param action an action to perform on the elements
-     */
-    default void forEach(TryConsumer<ResultSet, SQLException> action) {
-        forEach((rs, meta) -> action.accept(rs));
-    }
-
+public interface Select extends Query<Select> {
+
+  /**
+   * The N+1 problem resolution.
+   * <br/>Represents a {@code Select} statement which results will be processed in batch mode
+   *
+   * @param <T> a type of processed entity
+   */
+  interface ForBatch<T> {
+
+	/**
+	 * Sets a size of a batch that will be used to generates chunks with
+	 * <br/>Negative value of this parameter is silently ignored
+	 *
+	 * @param batchSize a size of a batch (must be positive number). Default value is {@code 1}
+	 * @return select for batch processing query abstraction
+	 */
+	@Nonnull
+	ForBatch<T> size(int batchSize);
+
+	/**
+	 * Executes this SELECT statement applying a {@code batchProcessor} function to each chunk<br/>
+	 * <br/><table>
+	 * <caption>A {@code batchProcessor} function parameters</caption>
+	 * <tr>
+	 * <th>Argument</th>
+	 * <th>Type</th>
+	 * <th>Description</th>
+	 * </tr>
+	 * <tr>
+	 * <td>batch</td>
+	 * <td>{@linkplain List}</td>
+	 * <td>a list of items sliced by the {@linkplain #size(int)} value</td>
+	 * </tr>
+	 * </table>
+	 *
+	 * @param batchProcessor a batch processor function
+	 * @return a {@linkplain Stream} of resulting (post-processed) items
+	 */
+	@Nonnull
+	default Stream<T> execute(TryConsumer<List<T>, ? extends Exception> batchProcessor) {
+	  if (null == batchProcessor) throw new NullPointerException("Batch processor function must be provided");
+	  return execute((batch, session) -> batchProcessor.accept(batch));
+	}
+
+	/**
+	 * Executes this SELECT statement applying a {@code batchProcessor} function to each chunk<br/>
+	 * <br/><table>
+	 * <caption>A {@code batchProcessor} function parameters</caption>
+	 * <tr>
+	 * <th>Argument</th>
+	 * <th>Type</th>
+	 * <th>Description</th>
+	 * </tr>
+	 * <tr>
+	 * <td>batch</td>
+	 * <td>{@linkplain List}</td>
+	 * <td>a list of items sliced by the {@linkplain #size(int)} value</td>
+	 * </tr>
+	 * <tr>
+	 * <td>session</td>
+	 * <td>{@linkplain Session}</td>
+	 * <td>a query session bound to this implicitly created transaction</td>
+	 * </tr>
+	 * </table>
+	 *
+	 * @param batchProcessor a batch processor function
+	 * @return a {@linkplain Stream} of resulting (post-processed) items
+	 */
+	@Nonnull
+	default Stream<T> execute(TryBiConsumer<List<T>, Session, ? extends Exception> batchProcessor) {
+	  if (null == batchProcessor) throw new NullPointerException("Batch processor function must be provided");
+	  return execute((batch, session, batchIndex) -> batchProcessor.accept(batch, session));
+	}
+
+	/**
+	 * Executes this SELECT statement applying a {@code batchProcessor} function to each chunk<br/>
+	 * <br/><table>
+	 * <caption>A {@code batchProcessor} function parameters</caption>
+	 * <tr>
+	 * <th>Argument</th>
+	 * <th>Type</th>
+	 * <th>Description</th>
+	 * </tr>
+	 * <tr>
+	 * <td>batch</td>
+	 * <td>{@linkplain List}</td>
+	 * <td>a list of items sliced by the {@linkplain #size(int)} value</td>
+	 * </tr>
+	 * <tr>
+	 * <td>session</td>
+	 * <td>{@linkplain Session}</td>
+	 * <td>a query session bound to this implicitly created transaction</td>
+	 * </tr>
+	 * <tr>
+	 * <td>index</td>
+	 * <td>{@linkplain Integer}</td>
+	 * <td>current batch number being processed</td>
+	 * </tr>
+	 * </table>
+	 *
+	 * @param batchProcessor a batch processor function
+	 * @return a {@linkplain Stream} of resulting (post-processed) items
+	 */
+	@Nonnull
+	Stream<T> execute(TryTriConsumer<List<T>, Session, Integer, ? extends Exception> batchProcessor);
+
+  }
+
+  /**
+   * Executes this SELECT statement applying a {@code batchProcessor} function to each chunk<br/>
+   * <br/><table>
+   * <caption>a {@code mapper} function parameters</caption>
+   * <tr>
+   * <th>Argument</th>
+   * <th>Type</th>
+   * <th>Description</th>
+   * </tr>
+   * <tr>
+   * <td>rs</td>
+   * <td>{@linkplain ValueReader}</td>
+   * <td>a convenient wrapper for {@linkplain ResultSet} for value read</td>
+   * </tr>
+   * <tr>
+   * <td>index</td>
+   * <td>{@linkplain Integer}</td>
+   * <td>current underlying {@linkplain ResultSet} number being processed</td>
+   * </tr>
+   * </table>
+   *
+   * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
+   * @param <T>    an element type
+   * @return select for batch processing query abstraction
+   */
+  @Nonnull
+  <T> ForBatch<T> forBatch(TryBiFunction<ValueReader, Integer, T, SQLException> mapper);
+
+  /**
+   * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
+   * @param <T>    an element type
+   * @return select for batch processing query abstraction
+   */
+  @Nonnull
+  default <T> ForBatch<T> forBatch(TryFunction<ValueReader, T, SQLException> mapper) {
+	if (null == mapper) throw new NullPointerException("Mapper must be provided");
+	return forBatch((rs, i) -> mapper.apply(rs));
+  }
+
+  /**
+   * @return select for batch processing query abstraction
+   */
+  @Nonnull
+  default ForBatch<Map<String, Object>> forBatch() {
+	return forBatch(JDBCDefaults::defaultMapper);
+  }
+
+  /**
+   * Retrieves a metadata for this SELECT statement<br/>
+   * <br/><table>
+   * <caption>a {@code mapper} function parameters</caption>
+   * <tr>
+   * <th>Argument</th>
+   * <th>Type</th>
+   * <th>Description</th>
+   * </tr>
+   * <tr>
+   * <td>meta</td>
+   * <td>{@linkplain Metadata}</td>
+   * <td>a convenient wrapper for {@linkplain ResultSet} metadata read</td>
+   * </tr>
+   * </table>
+   *
+   * @param mapper {@linkplain Metadata} mapper
+   * @return a {@linkplain Metadata} for this query
+   * @throws NullPointerException if {@code mapper} is null
+   */
+  @Nonnull
+  <T> T forMeta(Function<Metadata, T> mapper);
+
+  /**
+   * In cases when single result of SELECT statement is expected
+   * <br/>Like <code>SELECT COUNT(*) FROM TABLE_NAME</code> etc<br/>
+   * <br/><table>
+   * <caption>a {@code mapper} function parameters</caption>
+   * <tr>
+   * <th>Argument</th>
+   * <th>Type</th>
+   * <th>Description</th>
+   * </tr>
+   * <tr>
+   * <td>rs</td>
+   * <td>{@linkplain ValueReader}</td>
+   * <td>a convenient wrapper for {@linkplain ResultSet} for value read</td>
+   * </tr>
+   * </table>
+   *
+   * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
+   * @throws NullPointerException if <code>mapper</code> is null
+   * @see #execute(TryFunction)
+   */
+  @Nonnull
+  default <T> Optional<T> single(TryFunction<ValueReader, T, SQLException> mapper) {
+	T result;
+	try {
+	  result = fetchSize(1).maxRows(1).execute(mapper).collect(Collectors.toList()).iterator().next();
+	} catch (NoSuchElementException e) {
+	  result = null;
+	} catch (Exception e) {
+	  throw SQLRuntimeException.class.isAssignableFrom(e.getClass()) ? Utils.newSQLRuntimeException(e) : new RuntimeException(e);
+	}
+	return ofNullable(result);
+  }
+
+
+  /**
+   * Executes SELECT statement for SINGLE result with default mapper applied
+   *
+   * @return an {@link Optional} with the {@link Map} as a value
+   */
+  @Nonnull
+  default Optional<Map<String, Object>> single() {
+	return single(JDBCDefaults::defaultMapper);
+  }
+
+  /**
+   * Executes this SELECT statement returning a {@code Stream} of mapped values as {@code Map}s
+   *
+   * @return a {@link Stream} of {@link Map}s
+   * @see #execute(TryFunction)
+   */
+  @Nonnull
+  default Stream<Map<String, Object>> execute() {
+	return execute(JDBCDefaults::defaultMapper);
+  }
+
+  /**
+   * <table>
+   *     <caption>a {@code mapper} function parameters</caption>
+   *     <tr>
+   *         <th>Argument</th>
+   *         <th>Type</th>
+   *         <th>Description</th>
+   *     </tr>
+   *     <tr>
+   *         <td>rs</td>
+   *         <td>{@linkplain ValueReader}</td>
+   *         <td>a convenient wrapper for {@linkplain ResultSet} for value read</td>
+   *     </tr>
+   *     <tr>
+   *         <td>index</td>
+   *         <td>{@linkplain Integer}</td>
+   *         <td>current underlying {@linkplain ResultSet} number being processed</td>
+   *     </tr>
+   * </table>
+   *
+   * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
+   * @param <T>    item type
+   * @return a {@link Stream} over mapped {@link ResultSet}
+   * @throws NullPointerException if <code>mapper</code> is null
+   */
+  @Nonnull
+  <T> Stream<T> execute(TryBiFunction<ValueReader, Integer, T, SQLException> mapper);
+
+  /**
+   * Executes this SELECT statement returning a {@code Stream} of mapped values over {@code ResultSet} object<br/>
+   * <br/><table>
+   * <caption>a {@code mapper} function parameters</caption>
+   * <tr>
+   * <th>Argument</th>
+   * <th>Type</th>
+   * <th>Description</th>
+   * </tr>
+   * <tr>
+   * <td>rs</td>
+   * <td>{@linkplain ValueReader}</td>
+   * <td>a convenient wrapper for {@linkplain ResultSet} for value read</td>
+   * </tr>
+   * </table>
+   *
+   * @param mapper a {@link ResultSet} mapper function which is not required to handle {@link SQLException}
+   * @return a {@link Stream} over mapped {@link ResultSet}
+   * @throws NullPointerException if mapper is null
+   * @throws SQLRuntimeException  as a wrapper for {@link SQLException}
+   * @throws NullPointerException if <code>mapper</code> is null
+   * @see #execute()
+   * @see ValueReader
+   */
+  @Nonnull
+  default <T> Stream<T> execute(TryFunction<ValueReader, T, SQLException> mapper) {
+	if (null == mapper) throw new NullPointerException("Mapper must be provided");
+	return execute((rs, i) -> mapper.apply(rs));
+  }
+
+  /**
+   * Configures {@link java.sql.Statement} fetch size parameter<br/>
+   * Default value is <code>15</code>
+   *
+   * @param size desired fetch size. Should be greater than <code>0</code>
+   * @return select query abstraction
+   * @implNote Default value is <code>15</code>
+   * @see java.sql.Statement#setFetchSize(int)
+   * @see ResultSet#setFetchSize(int)
+   */
+  @Nonnull
+  Select fetchSize(int size);
+
+  /**
+   * Updates max rows obtained with this query
+   *
+   * @param max rows number limit
+   * @return select query abstraction
+   * @see java.sql.Statement#setMaxRows(int)
+   */
+  @Nonnull
+  Select maxRows(int max);
+
+  /**
+   * Updates max rows obtained with this query
+   *
+   * @param max rows number limit
+   * @return select query abstraction
+   * @see java.sql.Statement#setLargeMaxRows(long)
+   */
+  @Nonnull
+  Select maxRows(long max);
 }

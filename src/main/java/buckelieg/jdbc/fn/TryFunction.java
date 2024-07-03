@@ -1,5 +1,5 @@
 /*
- * Copyright 2016- Anatoly Kutyakov
+ * Copyright 2024- Anatoly Kutyakov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import static java.util.Objects.requireNonNull;
 public interface TryFunction<I, O, E extends Throwable> {
 
     /**
-     * Represents some one-argument function that might throw an Exception
+     * Represents a one-argument function that might throw an Exception
      *
      * @param input function input.
      * @return mapped value
@@ -44,7 +44,7 @@ public interface TryFunction<I, O, E extends Throwable> {
      * @param <T> the type of the input and output objects to the function
      * @return a function that always returns its input argument
      */
-    static <T> TryFunction<T, T, ?> identity() {
+    static <T, E extends Throwable> TryFunction<T, T, E> identity() {
         return t -> t;
     }
 
@@ -73,11 +73,11 @@ public interface TryFunction<I, O, E extends Throwable> {
      * @return a composed function that first applies the {@code before}
      * function and then applies this function
      * @throws E                    an exception
-     * @throws NullPointerException if before is null
+     * @throws NullPointerException if <code>before</code> is null
      * @see #andThen(TryFunction)
      */
     default <V> TryFunction<V, O, E> compose(TryFunction<? super V, ? extends I, ? extends E> before) throws E {
-        requireNonNull(before);
+        if (null == before) throw new NullPointerException("before Function must be provided");
         return (V v) -> apply(before.apply(v));
     }
 
@@ -90,10 +90,11 @@ public interface TryFunction<I, O, E extends Throwable> {
      * @return a composed function that first applies this function and then
      * applies the {@code after} function
      * @throws E                    an exception
-     * @throws NullPointerException if after is null
+     * @throws NullPointerException if <code>after</code> is null
      * @see #compose(TryFunction)
      */
     default <V> TryFunction<I, V, E> andThen(TryFunction<? super O, ? extends V, ? extends E> after) throws E {
-        return (I t) -> requireNonNull(after).apply(apply(t));
+        if (null == after) throw new NullPointerException("after Function must be provided");
+        return (I t) -> after.apply(apply(t));
     }
 }

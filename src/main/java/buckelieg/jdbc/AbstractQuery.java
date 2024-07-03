@@ -20,191 +20,149 @@ import buckelieg.jdbc.fn.TryRunnable;
 import buckelieg.jdbc.fn.TrySupplier;
 
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
+import javax.annotation.ParametersAreNonnullByDefault;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
-import static buckelieg.jdbc.Utils.collectAndThrow;
 import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static java.lang.Math.max;
 import static java.util.Objects.requireNonNull;
 
 @SuppressWarnings("unchecked")
-abstract class AbstractQuery<S extends Statement> implements Query {
+@ParametersAreNonnullByDefault
+abstract class AbstractQuery<Q extends Query<Q>, S extends Statement> implements Query<Q> {
 
-    protected final Executor conveyor;
-    protected S statement;
-    protected final String query;
-    private final String sqlString;
-    protected final TrySupplier<Connection, SQLException> connectionSupplier;
-    protected boolean skipWarnings = true;
-    protected final boolean isPrepared;
-    protected int timeout;
-    protected TimeUnit unit = TimeUnit.SECONDS;
-    protected boolean isPoolable;
-    protected boolean poolable;
-    protected boolean escapeProcessing = true;
-    protected final Object[] params;
-    protected Connection connectionInUse;
-    protected final boolean isTransactionRunning;
-    protected TryRunnable<SQLException> onCompleted;
+  protected S statement;
+  protected final String query;
+  protected final TrySupplier<Connection, SQLException> connectionSupplier;
+  private final TryConsumer<Connection, ? extends Throwable> connectionConsumer;
+  protected final Supplier<ExecutorService> executorServiceSupplier;
+  protected boolean skipWarnings = true;
+  protected final boolean isPrepared;
+  protected int timeout;
+  protected TimeUnit unit = TimeUnit.SECONDS;
+  protected boolean poolable;
+  protected boolean escapeProcessing = true;
+  protected Runnable finisher = () -> {};
 
-    private final Lock lock;
-    private final Condition condition;
-    private final AtomicBoolean isRunning = new AtomicBoolean(false);
+  protected final Object[] params;
+  private final AtomicReference<Connection> connectionInUse = new AtomicReference<>();
 
-    AbstractQuery(Lock lock, Condition condition, boolean isTransactionRunning, Executor conveyor, TrySupplier<Connection, SQLException> connectionSupplier, @Nullable TryRunnable<SQLException> onCompleted, String query, Object... params) {
-        this.lock = lock;
-        this.condition = condition;
-        this.conveyor = conveyor;
-        this.query = query;
-        this.connectionSupplier = connectionSupplier;
-        this.params = params;
-        this.isPrepared = params != null && params.length != 0;
-        this.sqlString = asSQL(query, params);
-        this.isTransactionRunning = isTransactionRunning;
-        this.onCompleted = onCompleted;
-    }
+  AbstractQuery(
+		  TrySupplier<Connection, SQLException> connectionSupplier,
+		  TryConsumer<Connection, ? extends Throwable> connectionConsumer,
+		  Supplier<ExecutorService> executorServiceSupplier,
+		  String query, Object... params) {
+	this.query = query;
+	this.connectionSupplier = connectionSupplier;
+	this.connectionConsumer = connectionConsumer;
+	this.executorServiceSupplier = executorServiceSupplier;
+	this.params = params;
+	this.isPrepared = params != null && params.length != 0;
+  }
 
-    @Override
-    public void close() {
-        collectAndThrow(
-                () -> {
-                    if (statement != null && !statement.isClosed()) {
-                        statement.close(); // by JDBC spec: subsequently closes all result sets opened by this statement
-                    }
-                },
-                () -> {
-                    if (onCompleted != null) {
-                        onCompleted.run();
-                    }
-                }
-        );
-    }
+  void close() {
+	try {
+	  if (null != statement && !statement.isClosed()) {
+		statement.close(); // by JDBC spec: subsequently closes all result sets opened by this statement
+	  }
+	} catch (SQLException e) {
+	  throw newSQLRuntimeException(e);
+	} finally {
+	  if (null != connectionConsumer) {
+		try {
+		  connectionConsumer.accept(connectionInUse.getAndSet(null));
+		} catch (Throwable e) {
+		  throw newSQLRuntimeException(e);
+		}
+	  }
+	}
+  }
 
-    final void setTimeout() {
-        setStatementParameter(statement -> statement.setQueryTimeout(max((int) requireNonNull(unit, "Time Unit must be provided").toSeconds(timeout), 0)));
-    }
+  final void setQueryBasicParameters(S statement) throws SQLException {
+	accept(() -> statement.setQueryTimeout(max((int) requireNonNull(unit, "Time Unit must be provided").toSeconds(timeout), 0)));
+	accept(() -> statement.setPoolable(poolable));
+	accept(() -> statement.setEscapeProcessing(escapeProcessing));
+  }
 
-    final void setPoolable() {
-        setStatementParameter(statement -> statement.setPoolable(poolable));
-    }
+  @Nonnull
+  @Override
+  public Q poolable(boolean poolable) {
+	this.poolable = poolable;
+	return (Q) this;
+  }
 
-    final void setEscapeProcessing() {
-        setStatementParameter(statement -> statement.setEscapeProcessing(escapeProcessing));
-    }
+  @Nonnull
+  @Override
+  public Q timeout(int timeout, TimeUnit unit) {
+	this.unit = requireNonNull(unit, "Time unit must be provided");
+	this.timeout = timeout;
+	return (Q) this;
+  }
 
-    final <Q extends Query> Q setTimeout(int timeout, TimeUnit unit) {
-        this.timeout = timeout;
-        this.unit = requireNonNull(unit, "Time unit must be provided");
-        return (Q) this;
-    }
+  @Nonnull
+  @Override
+  public Q escaped(boolean escapeProcessing) {
+	this.escapeProcessing = escapeProcessing;
+	return (Q) this;
+  }
 
-    final <Q extends Query> Q setPoolable(boolean poolable) {
-        this.poolable = poolable;
-        return (Q) this;
-    }
+  @Nonnull
+  @Override
+  public Q skipWarnings(boolean skipWarnings) {
+	this.skipWarnings = skipWarnings;
+	return (Q) this;
+  }
 
-    final <Q extends Query> Q setSkipWarnings(boolean skipWarnings) {
-        this.skipWarnings = skipWarnings;
-        return (Q) this;
-    }
+  @Nonnull
+  @Override
+  public Q print(Consumer<String> printer) {
+	if (null == printer) throw new NullPointerException("Printer must be provided");
+	printer.accept(asSQL());
+	return (Q) this;
+  }
 
-    final <Q extends Query> Q setEscapeProcessing(boolean escapeProcessing) {
-        this.escapeProcessing = escapeProcessing;
-        return (Q) this;
-    }
+  final void accept(TryRunnable<SQLException> action) throws SQLException {
+	try {
+	  action.run();
+	  if (!skipWarnings && statement.getWarnings() != null) throw statement.getWarnings();
+	} catch (AbstractMethodError ame) {
+	  // ignore this possible vendor-specific JDBC driver's error.
+	}
+  }
 
-    final <Q extends Query> Q log(Consumer<String> printer) {
-        requireNonNull(printer, "Printer must be provided");
-        conveyor.execute(() -> printer.accept(sqlString));
-        return (Q) this;
-    }
+  String asSQL(String query, Object... params) {
+	return Utils.asSQL(query, params);
+  }
 
-    final <O> O jdbcTry(TrySupplier<O, SQLException> supplier) {
-        O result = null;
-        try {
-            result = supplier.get();
-            if (!skipWarnings && statement.getWarnings() != null) {
-                throw statement.getWarnings();
-            }
-        } catch (AbstractMethodError ame) {
-            // ignore this possible vendor-specific JDBC driver's error.
-        } catch (SQLException e) {
-            close();
-            throw newSQLRuntimeException(e);
-        } catch (Exception e) {
-            if (!e.getClass().equals(SQLRuntimeException.class)) {
-                close();
-                throw new RuntimeException(e);
-            } else {
-                throw e;
-            }
-        }
-        return result;
-    }
+  @Nonnull
+  @Override
+  public final String asSQL() {
+	return asSQL(query, params);
+  }
 
-    final void jdbcTry(TryRunnable<SQLException> action) {
-        try {
-            action.run();
-            if (!skipWarnings && statement.getWarnings() != null) {
-                throw statement.getWarnings();
-            }
-        } catch (AbstractMethodError ame) {
-            // ignore this possible vendor-specific JDBC driver's error.
-        } catch (SQLException e) {
-            close();
-            throw newSQLRuntimeException(e);
-        } catch (Exception e) {
-            if (!e.getClass().equals(SQLRuntimeException.class)) {
-                close();
-                throw new RuntimeException(e);
-            } else {
-                throw e;
-            }
-        }
-    }
+  @Override
+  public String toString() {
+	return query;
+  }
 
-    final void setStatementParameter(TryConsumer<S, SQLException> action) {
-        jdbcTry(() -> action.accept(statement));
-    }
+  protected final Connection getConnection() {
+	return connectionInUse.updateAndGet(connection -> {
+	  if (null == connection) {
+		try {
+		  connection = connectionSupplier.get();
+		} catch (SQLException e) {
+		  throw Utils.newSQLRuntimeException(e);
+		}
+	  }
+	  return connection;
+	});
+  }
 
-    final synchronized <O> O runSync(TrySupplier<O, SQLException> action) {
-        try {
-            lock.lock();
-            while (isRunning.get()) {
-                condition.await();
-            }
-            isRunning.set(true);
-            return jdbcTry(action);
-        } catch (Exception e) {
-            throw newSQLRuntimeException(e);
-        } finally {
-            isRunning.set(false);
-            condition.signalAll();
-            lock.unlock();
-        }
-    }
-
-    String asSQL(String query, Object... params) {
-        return Utils.asSQL(query, params);
-    }
-
-    @Nonnull
-    @Override
-    public final String asSQL() {
-        return sqlString;
-    }
-
-    @Override
-    public String toString() {
-        return asSQL();
-    }
 }

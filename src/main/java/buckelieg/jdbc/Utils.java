@@ -15,27 +15,25 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.*;
+import buckelieg.jdbc.fn.TryFunction;
+import buckelieg.jdbc.fn.TryQuadFunction;
 
 import javax.annotation.Nonnull;
-import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.lang.reflect.Method;
-import java.sql.*;
-import java.util.AbstractMap.SimpleImmutableEntry;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.*;
 import java.util.Map.Entry;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
+import java.util.stream.BaseStream;
+import java.util.stream.IntStream;
 
 import static java.lang.String.format;
 import static java.lang.reflect.Proxy.newProxyInstance;
-import static java.sql.JDBCType.*;
 import static java.util.Arrays.asList;
 import static java.util.Collections.singletonList;
 import static java.util.Objects.requireNonNull;
@@ -47,427 +45,273 @@ import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Stream.of;
 import static java.util.stream.StreamSupport.stream;
 
-final class Utils {
+enum Utils {
+  ;
+  static final String EXCEPTION_MESSAGE = "Unsupported operation";
+  static final String STATEMENT_DELIMITER = ";";
+  static final Pattern PARAMETER = compile("\\?");
+  private static final String QUOTATION_ESCAPE = "(?=(([^\"']*\"'){2})*[^\"']*$)";
+  static final Pattern NAMED_PARAMETER = compile(format("(:\\w*\\b)%s", QUOTATION_ESCAPE));
+  private static final Pattern STATEMENT_DELIMITER_PATTERN = compile(format("%s%s+", STATEMENT_DELIMITER, QUOTATION_ESCAPE));
 
-    static final String EXCEPTION_MESSAGE = "Unsupported operation";
-    static final String STATEMENT_DELIMITER = ";";
-    static final Pattern PARAMETER = compile("\\?");
-    private static final String QUOTATION_ESCAPE = "(?=(([^\"']*\"'){2})*[^\"']*$)";
-    static final Pattern NAMED_PARAMETER = compile(format("(:\\w*\\b)%s", QUOTATION_ESCAPE));
-    private static final Pattern STATEMENT_DELIMITER_PATTERN = compile(format("%s%s+", STATEMENT_DELIMITER, QUOTATION_ESCAPE));
+  // Java regexp does not support conditional regexps. We will enumerate all possible cases
+  static final Pattern STORED_PROCEDURE = compile(
+		  format(
+				  "%s|%s|%s|%s|%s|%s",
+				  "(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*(\\(\\s*)\\)",
+				  "(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*((\\(\\s*)\\?\\s*)(,\\s*\\?)*\\)",
+				  "(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+",
+				  "\\{\\s*(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*\\}",
+				  "\\{\\s*(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*((\\(\\s*)\\?\\s*)(,\\s*\\?)*\\)\\s*\\}",
+				  "\\{\\s*(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*(\\(\\s*)\\)\\s*\\}"
+		  ),
+		  Pattern.CASE_INSENSITIVE
+  );
 
-    // Java regexp does not support conditional regexps. We will enumerate all possible variants.
-    static final Pattern STORED_PROCEDURE = compile(format("%s|%s|%s|%s|%s|%s",
-            "(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*(\\(\\s*)\\)",
-            "(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*((\\(\\s*)\\?\\s*)(,\\s*\\?)*\\)",
-            "(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+",
-            "\\{\\s*(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*\\}",
-            "\\{\\s*(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*((\\(\\s*)\\?\\s*)(,\\s*\\?)*\\)\\s*\\}",
-            "\\{\\s*(\\?\\s*=\\s*)?call\\s+(\\w+.{1}){0,2}\\w+\\s*(\\(\\s*)\\)\\s*\\}"
-    ), Pattern.CASE_INSENSITIVE);
+  @Nonnull
+  static Entry<String, Object[]> prepareQuery(String query, Iterable<? extends Entry<String, ?>> namedParams) {
+	Map<Integer, Object> indicesToValues = new TreeMap<>();
+	Map<String, Optional<?>> transformedParams = stream(namedParams.spliterator(), false).collect(toMap(
+			e -> e.getKey().startsWith(":") ? e.getKey() : format(":%s", e.getKey()),
+			e -> ofNullable(e.getValue()) // HashMap/ConcurrentHashMap merge function fails on null values
+	));
+	Matcher matcher = NAMED_PARAMETER.matcher(query);
+	int idx = 0;
+	while (matcher.find())
+	  for (Object o : asIterable(transformedParams.getOrDefault(matcher.group(), empty()))) indicesToValues.put(++idx, o);
+	for (Entry<String, Optional<?>> e : transformedParams.entrySet()) {
+	  query = query.replaceAll(
+			  format("(%s\\b)%s", e.getKey(), QUOTATION_ESCAPE),
+			  stream(asIterable(e.getValue()).spliterator(), false).map(o -> "?").collect(joining(","))
+	  );
+	}
+	return entry(checkAnonymous(query), indicesToValues.values().toArray());
+  }
 
-    private static final Map<SQLType, TryBiFunction<ResultSet, Integer, Object, SQLException>> defaultReaders = new HashMap<>();
-    private static final Map<SQLType, TryTriConsumer<ResultSet, Integer, Object, SQLException>> defaultWriters = new HashMap<>();
+  @SuppressWarnings({"rawtypes", "unchecked", "OptionalUsedAsFieldOrParameterType"})
+  @Nonnull
+  private static Iterable<?> asIterable(Optional o) {
+	Iterable<?> iterable;
+	Object value = o.orElse(singletonList(null));
+	if (value.getClass().isArray()) {
+	  if (value instanceof Object[]) iterable = asList((Object[]) value);
+	  else iterable = new BoxedPrimitiveIterable(value);
+	} else if (value instanceof Iterable) iterable = (Iterable<?>) value;
+	else iterable = singletonList(value);
+	return iterable;
+  }
 
-    static {
-        // standard "recommended" readers
-        defaultReaders.put(BINARY, ResultSet::getBytes);
-        defaultReaders.put(VARBINARY, ResultSet::getBytes);
-        defaultReaders.put(LONGVARBINARY, (input, index) -> {
-            try (InputStream is = input.getBinaryStream(index); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
-                byte[] buffer = new byte[1024];
-                int length;
-                while ((length = is.read(buffer)) != -1) {
-                    bos.write(buffer, 0, length);
-                }
-                return bos.toByteArray();
-            } catch (Throwable t) {
-                throw newSQLRuntimeException(t);
-            }
-        });
-        defaultReaders.put(VARCHAR, ResultSet::getString);
-        defaultReaders.put(CHAR, ResultSet::getString);
-        defaultReaders.put(LONGVARCHAR, (input, index) -> {
-            try (BufferedReader r = new BufferedReader(input.getCharacterStream(index))) {
-                return r.lines().collect(joining("\r\n"));
-            } catch (Throwable t) {
-                throw newSQLRuntimeException(t);
-            }
-        });
-        defaultReaders.put(DATE, ResultSet::getDate);
-        defaultReaders.put(TIMESTAMP, ResultSet::getTimestamp);
-        defaultReaders.put(TIMESTAMP_WITH_TIMEZONE, ResultSet::getTimestamp);
-        defaultReaders.put(TIME, ResultSet::getTime);
-        defaultReaders.put(TIME_WITH_TIMEZONE, ResultSet::getTime);
-        defaultReaders.put(BIT, ResultSet::getBoolean);
-        defaultReaders.put(TINYINT, ResultSet::getByte);
-        defaultReaders.put(SMALLINT, ResultSet::getShort);
-        defaultReaders.put(INTEGER, ResultSet::getInt);
-        defaultReaders.put(BIGINT, ResultSet::getLong);
-        defaultReaders.put(DECIMAL, ResultSet::getBigDecimal);
-        defaultReaders.put(NUMERIC, ResultSet::getBigDecimal);
-        defaultReaders.put(FLOAT, ResultSet::getDouble);
-        defaultReaders.put(DOUBLE, ResultSet::getDouble);
-        defaultReaders.put(REAL, ResultSet::getFloat);
-        defaultReaders.put(JAVA_OBJECT, ResultSet::getObject);
-        defaultReaders.put(OTHER, ResultSet::getObject);
-    }
+  static boolean isProcedure(String query) {
+	return STORED_PROCEDURE.matcher(query).matches();
+  }
 
-    static final TryFunction<ResultSet, Map<String, Object>, SQLException> defaultMapper = rs -> {
-        ResultSetMetaData meta = rs.getMetaData();
-        int columnCount = meta.getColumnCount();
-        Map<String, Object> result = new LinkedHashMap<>(columnCount);
-        for (int col = 1; col <= columnCount; col++) {
-            result.put(meta.getColumnLabel(col), defaultReaders.getOrDefault(valueOf(meta.getColumnType(col)), ResultSet::getObject).apply(rs, col));
-        }
-        return result;
-    };
+  static String checkAnonymous(String query) {
+	if (!isAnonymous(query)) throw new IllegalArgumentException(format("Named parameters mismatch for query: '%s'", query));
+	return query;
+  }
 
-    static final class DefaultMapper implements TryFunction<ResultSet, Map<String, Object>, SQLException> {
+  static boolean isAnonymous(String query) {
+	return !NAMED_PARAMETER.matcher(query).find();
+  }
 
-        private TryFunction<ResultSet, Map<String, Object>, SQLException> mapper;
-        private List<Entry<Entry<String, Integer>, TryBiFunction<ResultSet, Integer, Object, SQLException>>> colReaders;
+  static SQLRuntimeException newSQLRuntimeException(Throwable... throwables) {
+	StringBuilder messages = new StringBuilder();
+	for (Throwable throwable : throwables) {
+	  Throwable t = throwable;
+	  StringBuilder message = ofNullable(t).map(Throwable::getMessage).map(msg -> new StringBuilder(format("%s ", msg.trim()))).orElse(new StringBuilder());
+	  AtomicReference<String> prevMsg = new AtomicReference<>();
+	  while ((t = t.getCause()) != null) {
+		ofNullable(t.getMessage()).map(msg -> format("%s ", msg.trim())).filter(msg -> prevMsg.get() != null && prevMsg.get().equals(msg)).ifPresent(message::append);
+		prevMsg.set(t.getMessage() != null ? t.getMessage().trim() : null);
+	  }
+	  messages.append(message);
+	}
+	return new SQLRuntimeException(messages.toString().trim(), true);
+  }
 
-        @Override
-        public Map<String, Object> apply(ResultSet input) throws SQLException {
-            if (mapper == null) {
-                ResultSetMetaData meta = input.getMetaData();
-                int columnCount = meta.getColumnCount();
-                colReaders = new ArrayList<>(columnCount);
-                for (int col = 1; col <= columnCount; col++) {
-                    colReaders.add(new SimpleImmutableEntry<>(new SimpleImmutableEntry<>(meta.getColumnLabel(col), col), defaultReaders.getOrDefault(valueOf(meta.getColumnType(col)), ResultSet::getObject)));
-                }
-                mapper = rs -> {
-                    Map<String, Object> result = new LinkedHashMap<>(columnCount);
-                    for (Entry<Entry<String, Integer>, TryBiFunction<ResultSet, Integer, Object, SQLException>> e : colReaders) {
-                        result.put(e.getKey().getKey(), e.getValue().apply(rs, e.getKey().getValue()));
-                    }
-                    return result;
-                };
-            }
-            return mapper.apply(input);
-        }
-    }
+  // TODO retain SQL hint comments: /*+ */
+  static String wipeComments(String query) {
+	int queryIndex = -4;
+	String replaced = query.replaceAll("\\R", "\r\n");
+	List<Integer> singleLineCommentStartIndices = new ArrayList<>();
+	List<Integer> singleLineCommentEndIndices = new ArrayList<>();
+	List<Integer> multiLineCommentStartIndices = new ArrayList<>();
+	List<Integer> multiLineCommentsEndIndices = new ArrayList<>();
+	boolean isInsideComment = false;
+	boolean isInsideQuotes = false;
+	boolean isSingleLineComment = false;
+	boolean isInnerComment = false;
+	Character outerQuote = null;
+	for (String line : replaced.split("\r\n")) {
+	  queryIndex = queryIndex + 3;
+	  if (line.isEmpty()) {
+		queryIndex--;
+		continue;
+	  }
+	  for (int i = 1; i < line.length(); i++) {
+		++queryIndex;
+		char prev = line.charAt(i - 1);
+		char cur = line.charAt(i);
+		if (isInsideQuotes) {
+		  if ('\'' == prev || '"' == prev) {
+			if (outerQuote != null && outerQuote.equals(prev)) {
+			  isInsideQuotes = false;
+			  outerQuote = null;
+			}
+		  }
+		  continue;
+		}
+		if (isInsideComment) {
+		  if (isSingleLineComment) continue;
+		  if (!isInnerComment && ('*' == cur && '/' == prev)) {
+			isInnerComment = true;
+			continue;
+		  }
+		  if ('*' == prev && '/' == cur) {
+			multiLineCommentsEndIndices.add(queryIndex + 2);
+			isInnerComment = false;
+			isInsideComment = false;
+			continue;
+		  }
+		} else {
+		  if ('-' == cur && '-' == prev) {
+			singleLineCommentStartIndices.add(queryIndex);
+			isInsideComment = true;
+			isSingleLineComment = true;
+			continue;
+		  }
+		  if ('*' == cur && '/' == prev) {
+			isInsideComment = true;
+			multiLineCommentStartIndices.add(queryIndex);
+			continue;
+		  }
+		  if ('*' == prev && '/' == cur) {
+			multiLineCommentsEndIndices.add(queryIndex + 2);
+			isInsideComment = false;
+			continue;
+		  }
+		}
+		if ('\'' == prev || '"' == prev) {
+		  isInsideQuotes = true;
+		  outerQuote = prev;
+		}
+	  }
+	  if (isInsideComment && isSingleLineComment) {
+		singleLineCommentEndIndices.add(queryIndex + 2);
+		isSingleLineComment = false;
+		isInsideComment = false;
+	  }
+	}
+	if (multiLineCommentStartIndices.size() != multiLineCommentsEndIndices.size()) {
+	  throw new SQLRuntimeException(format("Multiline comments open/close tags count mismatch (%s/%s) for query:\r\n%s", multiLineCommentStartIndices.size(), multiLineCommentsEndIndices.size(), query), true);
+	}
+	if (!multiLineCommentStartIndices.isEmpty() && (multiLineCommentStartIndices.get(0) > multiLineCommentsEndIndices.get(0))) {
+	  throw new SQLRuntimeException(format("Unmatched start multiline comment at %s for query:\r\n%s", multiLineCommentStartIndices.get(0), query), true);
+	}
+	replaced = replaceChars(replaced, singleLineCommentStartIndices, singleLineCommentEndIndices);
+	replaced = replaceChars(replaced, multiLineCommentStartIndices, multiLineCommentsEndIndices);
+	return replaced.replaceAll("(\\s){2,}", " ").trim();
+  }
 
-    private Utils() {
-        throw new UnsupportedOperationException();
-    }
+  private static String replaceChars(String source, List<Integer> startIndices, List<Integer> endIndices) {
+	String replaced = source;
+	for (int i = 0; i < startIndices.size(); i++)
+	  replaced = replaced.replace(replaced.substring(startIndices.get(i), endIndices.get(i)), format("%" + (endIndices.get(i) - startIndices.get(i)) + "s", " "));
+	return replaced;
+  }
 
-    @Nonnull
-    static Entry<String, Object[]> prepareQuery(String query, Iterable<? extends Entry<String, ?>> namedParams) {
-        Map<Integer, Object> indicesToValues = new TreeMap<>();
-        Map<String, Optional<?>> transformedParams = stream(namedParams.spliterator(), false).collect(toMap(
-                e -> e.getKey().startsWith(":") ? e.getKey() : format(":%s", e.getKey()),
-                e -> ofNullable(e.getValue()) // HashMap/ConcurrentHashMap merge function fails on null values
-        ));
-        Matcher matcher = NAMED_PARAMETER.matcher(query);
-        int idx = 0;
-        while (matcher.find()) {
-            for (Object o : asIterable(transformedParams.getOrDefault(matcher.group(), empty()))) {
-                indicesToValues.put(++idx, o);
-            }
-        }
-        for (Entry<String, Optional<?>> e : transformedParams.entrySet()) {
-            query = query.replaceAll(
-                    format("(%s\\b)%s", e.getKey(), QUOTATION_ESCAPE),
-                    stream(asIterable(e.getValue()).spliterator(), false).map(o -> "?").collect(joining(","))
-            );
-        }
-        return new SimpleImmutableEntry<>(checkAnonymous(query), indicesToValues.values().toArray());
-    }
+  static String checkSingle(String query) {
+	query = wipeComments(query);
+	if (STATEMENT_DELIMITER_PATTERN.matcher(query).find())
+	  throw new IllegalArgumentException(format("Query '%s' is not a single one", query));
+	return query;
+  }
 
-    @SuppressWarnings({"rawtypes", "unchecked", "OptionalUsedAsFieldOrParameterType"})
-    private static Iterable<?> asIterable(Optional o) {
-        Iterable<?> iterable;
-        Object value = o.orElse(singletonList(null));
-        if (value.getClass().isArray()) {
-            if (value instanceof Object[]) {
-                iterable = asList((Object[]) value);
-            } else {
-                iterable = new BoxedPrimitiveIterable(value);
-            }
-        } else if (value instanceof Iterable) {
-            iterable = (Iterable<?>) value;
-        } else {
-            iterable = singletonList(value);
-        }
-        return iterable;
-    }
+  static <S extends PreparedStatement> S setStatementParameters(S statement, Object... params) throws SQLException {
+	int pNum = 0;
+	for (Object p : params) {
+//            Mappers.setParameter(statement, ++pNum, p);
+	  statement.setObject(++pNum, p);
+	}
+	return statement;
+  }
 
-    static boolean isProcedure(String query) {
-        return STORED_PROCEDURE.matcher(query).matches();
-    }
+  static String asSQL(String query, Object... params) {
+	String replaced = query;
+	int idx = 0;
+	Matcher matcher = PARAMETER.matcher(query);
+	while (matcher.find()) {
+	  Object p = params[idx];
+	  replaced = replaced.replaceFirst(
+			  "\\?",
+			  (p != null && p.getClass().isArray() ? of((Object[]) p) : of(ofNullable(p).orElse("null")))
+					  .map(value -> value instanceof String ? format("'%s'", value.toString().replaceAll("\\$", "")) : value.toString())
+					  .collect(joining(","))
+	  );
+	  idx++;
+	}
+	return replaced;
+  }
 
-    static String checkAnonymous(String query) {
-        if (!isAnonymous(query)) {
-            throw new IllegalArgumentException(format("Named parameters mismatch for query: '%s'", query));
-        }
-        return query;
-    }
+  @Nonnull
+  static <T> List<T> listResultSet(ResultSet resultSet, TryFunction<ResultSet, T, SQLException> mapper) throws SQLException {
+	List<T> result = new ArrayList<>();
+	while (resultSet.next())
+	  result.add(requireNonNull(mapper.apply(resultSet)));
+	return result;
+  }
 
-    static boolean isAnonymous(String query) {
-        return !NAMED_PARAMETER.matcher(query).find();
-    }
+  @Nonnull
+  static <K, V> Map.Entry<K, V> entry(K key, V value) {
+	return new AbstractMap.SimpleImmutableEntry<>(key, value);
+  }
 
-    static SQLRuntimeException newSQLRuntimeException(Throwable... throwables) {
-        StringBuilder messages = new StringBuilder();
-        for (Throwable throwable : throwables) {
-            Throwable t = throwable;
-            StringBuilder message = ofNullable(t.getMessage()).map(msg -> new StringBuilder(format("%s ", msg.trim()))).orElse(new StringBuilder());
-            AtomicReference<String> prevMsg = new AtomicReference<>();
-            while ((t = t.getCause()) != null) {
-                ofNullable(t.getMessage()).map(msg -> format("%s ", msg.trim())).filter(msg -> prevMsg.get() != null && prevMsg.get().equals(msg)).ifPresent(message::append);
-                prevMsg.set(t.getMessage() != null ? t.getMessage().trim() : null);
-            }
-            messages.append(message);
-        }
-        return new SQLRuntimeException(messages.toString().trim(), true);
-    }
+  @SuppressWarnings("unchecked")
+  @Nonnull
+  static <T> T proxy(T instance, List<Class<?>> into, TryQuadFunction<T, Object, Method, Object[], Object, Exception> handler) {
+	return (T) newProxyInstance(
+			requireNonNull(instance, "Instance must be provided").getClass().getClassLoader(),
+			requireNonNull(into, "Interface class must be provided").toArray(new Class[0]),
+			(proxy, method, args) -> handler.apply(instance, proxy, method, args)
+	);
+  }
 
-    @SafeVarargs
-    static <T extends Throwable> void collectAndThrow(TryRunnable<T>... actions) {
-        if (actions != null && actions.length > 0) {
-            List<Throwable> exceptions = new ArrayList<>();
-            for (TryRunnable<T> action : actions) {
-                try {
-                    action.run();
-                } catch (Throwable t) {
-                    exceptions.add(t);
-                }
-            }
-            if (!exceptions.isEmpty()) {
-                throw newSQLRuntimeException(exceptions.toArray(new Throwable[0]));
-            }
-        }
-    }
+  static Object proxy(Object stream) {
+	return proxy(stream, getAllInterfaces(stream.getClass()), (instance, proxy, method, args) -> {
+	  if (BaseStream.class.equals(method.getDeclaringClass())) {
+		if (!BaseStream.class.isAssignableFrom(method.getReturnType())) {
+		  if ("iterator".equals(method.getName()) || "spliterator".equals(method.getName())) {
+			throw new UnsupportedOperationException("not supported");
+		  }
+		  return method.invoke(instance, args);
+		} else return proxy(method.invoke(instance, args));
+	  }
+	  if (BaseStream.class.isAssignableFrom(method.getDeclaringClass())) {
+		if (!BaseStream.class.isAssignableFrom(method.getReturnType())) {
+		  try (AutoCloseable proxied = (BaseStream<?, ?>) instance) {
+			return method.invoke(proxied, args);
+		  } catch (Throwable t) {
+			throw Utils.newSQLRuntimeException(t.getCause(), t);
+		  }
+		} else return proxy(method.invoke(instance, args));
+	  }
+	  return method.invoke(instance, args);
+	});
+  }
 
-    static <T> T doInTransaction(
-            TrySupplier<Connection, SQLException> connectionSupplier,
-            TransactionIsolation isolationLevel,
-            TryConsumer<Connection, SQLException> beforeStart,
-            TryFunction<Connection, T, SQLException> action,
-            TryConsumer<Connection, SQLException> onCommit
-    ) throws SQLException {
-        Connection conn = connectionSupplier.get();
-        AtomicBoolean autoCommit = new AtomicBoolean(true);
-        Savepoint savepoint = null;
-        int isolation = conn.getTransactionIsolation();
-        T result;
-        try {
-            beforeStart.compose(connection -> {
-                if (isolationLevel != null && isolation != isolationLevel.level) {
-                    if (!conn.getMetaData().supportsTransactionIsolationLevel(isolationLevel.level)) {
-                        throw new SQLException(format("Unsupported transaction isolation level: '%s'", isolationLevel.name()));
-                    }
-                    conn.setTransactionIsolation(isolationLevel.level);
-                }
-                autoCommit.set(conn.getAutoCommit());
-                conn.setAutoCommit(false);
-            }).accept(conn);
-            result = action.apply(conn);
-        } catch (SQLException e) {
-            conn.rollback(savepoint);
-            conn.releaseSavepoint(savepoint);
-            throw e;
-        } finally {
-            onCommit.andThen(connection -> {
-                conn.setAutoCommit(autoCommit.get());
-                conn.setTransactionIsolation(isolation);
-            }).accept(conn);
-        }
-        return result;
-    }
+  static List<Class<?>> getAllInterfaces(Class<?> cls) {
+	Class<?> parent = cls;
+	List<Class<?>> interfaces = new ArrayList<>();
+	while (parent != null) {
+	  interfaces.addAll(asList(parent.getInterfaces()));
+	  parent = parent.getSuperclass();
+	}
+	return interfaces;
+  }
 
-    //    @SuppressWarnings("SynchronizationOnLocalVariableOrMethodParameter")
-    static <T> T doInTransaction(boolean forceClose, TrySupplier<Connection, SQLException> connectionSupplier, TransactionIsolation isolationLevel, TryFunction<Connection, T, SQLException> action) throws SQLException {
-        Connection conn = connectionSupplier.get();
-        boolean autoCommit = true;
-        Savepoint savepoint = null;
-        int isolation = conn.getTransactionIsolation();
-        T result;
-        try {
-            autoCommit = conn.getAutoCommit();
-            conn.setAutoCommit(false);
-            savepoint = conn.setSavepoint();
-            if (isolationLevel != null && isolation != isolationLevel.level) {
-                if (!conn.getMetaData().supportsTransactionIsolationLevel(isolationLevel.level)) {
-                    throw new SQLException(format("Unsupported transaction isolation level: '%s'", isolationLevel.name()));
-                }
-                conn.setTransactionIsolation(isolationLevel.level);
-            }
-            result = action.apply(conn);
-            conn.commit();
-            return result;
-        } catch (Exception e) {
-            conn.rollback(savepoint);
-            conn.releaseSavepoint(savepoint);
-            throw e;
-        } finally {
-            conn.setAutoCommit(autoCommit);
-            conn.setTransactionIsolation(isolation);
-            if (forceClose) {
-                conn.close();
-            }
-        }
-    }
-
-    // TODO retain SQL hints comments: /*+ */
-    static String cutComments(String query) {
-        int queryIndex = -4;
-        String replaced = query.replaceAll("\\R", "\r\n");
-        List<Integer> singleLineCommentStartIndices = new ArrayList<>();
-        List<Integer> singleLineCommentEndIndices = new ArrayList<>();
-        List<Integer> multiLineCommentStartIndices = new ArrayList<>();
-        List<Integer> multiLineCommentsEndIndices = new ArrayList<>();
-        boolean isInsideComment = false;
-        boolean isInsideQuotes = false;
-        boolean isSingleLineComment = false;
-        boolean isInnerComment = false;
-        Character outerQuote = null;
-        for (String line : replaced.split("\r\n")) {
-            queryIndex = queryIndex + 3;
-            if (line.isEmpty()) {
-                queryIndex--;
-                continue;
-            }
-            for (int i = 1; i < line.length(); i++) {
-                ++queryIndex;
-                char prev = line.charAt(i - 1);
-                char cur = line.charAt(i);
-                if (isInsideQuotes) {
-                    if ('\'' == prev || '"' == prev) {
-                        if (outerQuote != null && outerQuote.equals(prev)) {
-                            isInsideQuotes = false;
-                            outerQuote = null;
-                        }
-                    }
-                    continue;
-                }
-                if (isInsideComment) {
-                    if (isSingleLineComment) continue;
-                    if (!isInnerComment && ('*' == cur && '/' == prev)) {
-                        isInnerComment = true;
-                        continue;
-                    }
-                    if ('*' == prev && '/' == cur) {
-                        multiLineCommentsEndIndices.add(queryIndex + 2);
-                        isInnerComment = false;
-                        isInsideComment = false;
-                        continue;
-                    }
-                } else {
-                    if ('-' == cur && '-' == prev) {
-                        singleLineCommentStartIndices.add(queryIndex);
-                        isInsideComment = true;
-                        isSingleLineComment = true;
-                        continue;
-                    }
-                    if ('*' == cur && '/' == prev) {
-                        isInsideComment = true;
-                        multiLineCommentStartIndices.add(queryIndex);
-                        continue;
-                    }
-                    if ('*' == prev && '/' == cur) {
-                        multiLineCommentsEndIndices.add(queryIndex + 2);
-                        isInsideComment = false;
-                        continue;
-                    }
-                }
-                if ('\'' == prev || '"' == prev) {
-                    isInsideQuotes = true;
-                    outerQuote = prev;
-                }
-            }
-            if (isInsideComment && isSingleLineComment) {
-                singleLineCommentEndIndices.add(queryIndex + 2);
-                isSingleLineComment = false;
-                isInsideComment = false;
-            }
-        }
-        if (multiLineCommentStartIndices.size() != multiLineCommentsEndIndices.size()) {
-            throw new SQLRuntimeException(format("Multiline comments open/close tags count mismatch (%s/%s) for query:\r\n%s", multiLineCommentStartIndices.size(), multiLineCommentsEndIndices.size(), query), true);
-        }
-        if (!multiLineCommentStartIndices.isEmpty() && (multiLineCommentStartIndices.get(0) > multiLineCommentsEndIndices.get(0))) {
-            throw new SQLRuntimeException(format("Unmatched start multiline comment at %s for query:\r\n%s", multiLineCommentStartIndices.get(0), query), true);
-        }
-        replaced = replaceChars(replaced, singleLineCommentStartIndices, singleLineCommentEndIndices);
-        replaced = replaceChars(replaced, multiLineCommentStartIndices, multiLineCommentsEndIndices);
-        return replaced.replaceAll("(\\s){2,}", " ").trim();
-    }
-
-    private static String replaceChars(String source, List<Integer> startIndices, List<Integer> endIndices) {
-        String replaced = source;
-        for (int i = 0; i < startIndices.size(); i++) {
-            replaced = replaced.replace(replaced.substring(startIndices.get(i), endIndices.get(i)), format("%" + (endIndices.get(i) - startIndices.get(i)) + "s", " "));
-        }
-        return replaced;
-    }
-
-    static String checkSingle(String query) {
-        query = cutComments(query);
-        if (STATEMENT_DELIMITER_PATTERN.matcher(query).find()) {
-            throw new IllegalArgumentException(format("Query '%s' is not a single one", query));
-        }
-        return query;
-    }
-
-    static <S extends PreparedStatement> S setStatementParameters(S statement, Object... params) throws SQLException {
-        int pNum = 0;
-        for (Object p : params) {
-            statement.setObject(++pNum, p); // introduce type conversion here?
-        }
-        return statement;
-    }
-
-    static String asSQL(String query, Object... params) {
-        String replaced = query;
-        int idx = 0;
-        Matcher matcher = PARAMETER.matcher(query);
-        while (matcher.find()) {
-            Object p = params[idx];
-            replaced = replaced.replaceFirst(
-                    "\\?",
-                    (p != null && p.getClass().isArray() ? of((Object[]) p) : of(ofNullable(p).orElse("null")))
-                            .map(Object::toString)
-                            .collect(joining(","))
-            );
-            idx++;
-        }
-        return replaced;
-    }
-
-    static <T> Stream<T> rsStream(ResultSet resultSet, TryFunction<ResultSet, T, SQLException> mapper) {
-        return StreamSupport.stream(new ResultSetSpliterator(resultSet), false)
-                .map(rs -> {
-                    try {
-                        return mapper.apply(rs);
-                    } catch (SQLException e) {
-                        try {
-                            rs.close();
-                        } catch (SQLException e1) {
-                            throw newSQLRuntimeException(e1);
-                        }
-                        throw newSQLRuntimeException(e);
-                    }
-                })
-                .onClose(() -> {
-                    try {
-                        resultSet.close();
-                    } catch (SQLException e) {
-                        throw newSQLRuntimeException(e);
-                    }
-                });
-    }
-
-    @Nonnull
-    static <T> T wrap(T instance, Class<T> into) {
-        return wrap(instance, into, (source, proxy, method, args) -> method.invoke(source, args));
-    }
-
-    @SuppressWarnings("unchecked")
-    @Nonnull
-    static <T> T wrap(Object instance, Class<T> into, TryQuadFunction<T, Object, Method, Object[], Object, Throwable> handler) {
-        return (T) newProxyInstance(requireNonNull(instance, "Instance must be provided").getClass().getClassLoader(), new Class<?>[]{into}, (proxy, method, args) -> handler.apply((T) instance, proxy, method, args));
-    }
+  static PrimitiveIterator.OfInt newIntSequence() {
+	AtomicInteger cursor = new AtomicInteger();
+	return IntStream.generate(() -> cursor.getAndAdd(1)).iterator();
+  }
 
 }

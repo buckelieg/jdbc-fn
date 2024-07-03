@@ -24,30 +24,30 @@ import static java.lang.reflect.Array.getLength;
 
 final class BoxedPrimitiveIterable implements Iterable<Number> {
 
-    private final Object array;
-    private final int length;
+  private final Object array;
+  private final int length;
 
-    BoxedPrimitiveIterable(Object array) {
-        this.array = array;
-        this.length = getLength(array);
-    }
+  BoxedPrimitiveIterable(Object array) {
+	this.array = array;
+	this.length = getLength(array);
+  }
 
-    @Nonnull
-    @Override
-    public Iterator<Number> iterator() {
-        return new Iterator<Number>() {
+  @Nonnull
+  @Override
+  public Iterator<Number> iterator() {
+	return new Iterator<Number>() {
 
-            private final AtomicInteger currentIndex = new AtomicInteger();
+	  private final AtomicInteger currentIndex = new AtomicInteger();
 
-            @Override
-            public boolean hasNext() {
-                return currentIndex.get() < length;
-            }
+	  @Override
+	  public boolean hasNext() {
+		return currentIndex.get() < length;
+	  }
 
-            @Override
-            public Number next() {
-                return (Number) get(array, currentIndex.getAndIncrement());
-            }
-        };
-    }
+	  @Override
+	  public Number next() {
+		return (Number) get(array, currentIndex.getAndIncrement());
+	  }
+	};
+  }
 }

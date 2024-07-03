@@ -15,207 +15,225 @@
  */
 package buckelieg.jdbc;
 
+import buckelieg.jdbc.fn.TryConsumer;
 import buckelieg.jdbc.fn.TrySupplier;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.annotation.ParametersAreNonnullByDefault;
 import javax.annotation.concurrent.NotThreadSafe;
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.sql.SQLWarning;
+import java.sql.*;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
+import java.util.function.Supplier;
 import java.util.stream.StreamSupport;
 
 import static buckelieg.jdbc.Utils.*;
 import static java.lang.Math.max;
 import static java.lang.System.currentTimeMillis;
-import static java.util.Arrays.stream;
 import static java.util.Collections.emptyList;
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.toList;
 
 @NotThreadSafe
 @ParametersAreNonnullByDefault
 final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
 
-    private static final Consumer<SQLException> NOOP = e -> {
-        // do nothing
-    };
+  private static final Consumer<? super Throwable> NOOP = e -> {};
 
-    private final String script;
-    private final TrySupplier<Connection, SQLException> connectionSupplier;
-    private final List<T> params;
-    private String query;
-    private final ExecutorService conveyor;
-    private final ConcurrentMap<String, RSMeta.Column> metaCache;
-    private int timeout;
-    private TimeUnit unit = TimeUnit.SECONDS;
-    private Consumer<String> logger;
-    private boolean escaped = true;
-    private boolean skipErrors = true;
-    private boolean skipWarnings = true;
-    private boolean poolable;
-    private Consumer<SQLException> errorHandler = NOOP;
-    private final Lock lock;
-    private final Condition condition;
+  private final String script;
 
-    /**
-     * Creates script executor query
-     *
-     * @param connectionSupplier db connection supplier function
-     * @param script     an arbitrary SQL script to execute
-     * @throws IllegalArgumentException in case of corrupted script (like illegal comment lines encountered)
-     */
-    ScriptQuery(Lock lock, Condition condition, ExecutorService conveyor, ConcurrentMap<String, RSMeta.Column> metaCache, TrySupplier<Connection, SQLException> connectionSupplier, String script, @Nullable Iterable<T> namedParams) {
-        this.lock = lock;
-        this.condition = condition;
-        this.conveyor = conveyor;
-        this.metaCache = metaCache;
-        this.connectionSupplier = connectionSupplier;
-        this.script = script;
-        this.params = namedParams == null ? emptyList() : StreamSupport.stream(namedParams.spliterator(), false).collect(Collectors.toList());
-    }
+  private final TrySupplier<Connection, SQLException> connectionSupplier;
 
-    /**
-     * Executes script. All comments are cut out.
-     * Therefore all RDBMS-specific hints are ignored (like Oracle's <code>APPEND</code>) etc.
-     *
-     * @return a time, taken by this script to complete in milliseconds
-     * @throws SQLRuntimeException in case of any errors including {@link SQLWarning} (if corresponding option is set) OR (if timeout is set) - in case of execution run out of time.
-     */
-    @Nonnull
-    @Override
-    public Long execute() {
-        try {
-            if (timeout == 0) {
-                return doExecute();
-            } else {
-                try {
-                    return conveyor.submit(this::doExecute).get(timeout, unit);
-                } catch (Exception e) {
-                    throw new SQLException(e);
-                }
-            }
-        } catch (Exception e) {
-            throw newSQLRuntimeException(e);
-        } finally {
-            close();
-        }
-    }
+  private final TryConsumer<Connection, ? extends Throwable> connectionConsumer;
 
-    private long doExecute() throws SQLException {
-        return doInTransaction(false, connectionSupplier, null, conn -> {
-            long start = currentTimeMillis();
-            for (String query : script.split(STATEMENT_DELIMITER)) {
-                try {
-                    if (isAnonymous(query)) {
-                        executeQuery(new QueryImpl(lock, condition, conveyor, () -> conn, query));
-                    } else {
-                        Map.Entry<String, Object[]> preparedQuery = prepareQuery(query, params);
-                        if (isProcedure(preparedQuery.getKey())) {
-                            new StoredProcedureQuery(lock, condition, true, conveyor, metaCache, () -> conn, null, preparedQuery.getKey(), stream(preparedQuery.getValue()).map(p -> p instanceof P ? (P<?>) p : P.in(p)).toArray(P[]::new)).skipWarnings(skipWarnings).print(this::log).call();
-                        } else {
-                            executeQuery(new QueryImpl(lock, condition, conveyor, () -> conn, preparedQuery.getKey(), preparedQuery.getValue()));
-                        }
-                    }
-                } catch (Exception e) {
-                    if (skipErrors) {
-                        errorHandler.accept(new SQLException(e));
-                    } else {
-                        throw newSQLRuntimeException(e);
-                    }
-                }
-            }
-            return currentTimeMillis() - start;
-        });
-    }
+  private final Supplier<ExecutorService> executorServiceSupplier;
 
-    private void executeQuery(Query query) {
-        query.escaped(escaped).poolable(poolable).skipWarnings(skipWarnings).print(this::log).execute();
-    }
+  private final List<T> params;
+  private final AtomicReference<String> query = new AtomicReference<>();
+  private int timeout;
+  private TimeUnit unit = TimeUnit.SECONDS;
+  private Consumer<String> logger;
+  private boolean escaped = true;
+  private boolean skipErrors = true;
+  private boolean skipWarnings = true;
+  private boolean poolable;
+  private Connection connectionInUse;
 
-    private void log(String query) {
-        if (logger != null) logger.accept(query);
-    }
+  /**
+   * Creates script executor query
+   *
+   * @param connectionSupplier db connection supplier function
+   * @param script             an arbitrary SQL script to execute
+   * @throws IllegalArgumentException in case of corrupted script (like illegal comment lines encountered)
+   */
+  ScriptQuery(
+		  TrySupplier<Connection, SQLException> connectionSupplier,
+		  TryConsumer<Connection, ? extends Throwable> connectionConsumer,
+		  Supplier<ExecutorService> executorServiceSupplier,
+		  String script,
+		  @Nullable Iterable<T> namedParams) {
+	this.connectionSupplier = connectionSupplier;
+	this.connectionConsumer = connectionConsumer;
+	this.executorServiceSupplier = executorServiceSupplier;
+	this.script = script;
+	this.params = namedParams == null ? emptyList() : StreamSupport.stream(namedParams.spliterator(), false).collect(toList());
+  }
 
-    @Nonnull
-    @Override
-    public Script escaped(boolean escapeProcessing) {
-        this.escaped = escapeProcessing;
-        return this;
-    }
+  /**
+   * Executes script. All comments are cut out.
+   * Therefore, all RDBMS-specific hints are ignored (like Oracle's <code>APPEND</code>) etc.
+   *
+   * @return a time, taken by this script to complete in milliseconds
+   * @throws SQLRuntimeException in case of any errors including {@link SQLWarning} (if corresponding option is set) OR (if timeout is set) - in case of execution run out of time.
+   */
+  @Nonnull
+  @Override
+  public Long execute() {
+	TrySupplier<Long, SQLException> execute = () -> {
+	  connectionInUse = connectionSupplier.get();
+	  return doExecute(connectionInUse);
+	};
+	Future<Long> task = null;
+	try {
+	  if (timeout == 0) return execute.get();
+	  else {
+		task = executorServiceSupplier.get().submit(execute::get);
+		return task.get(timeout, unit);
+	  }
+	} catch (SQLException e) {
+	  throw newSQLRuntimeException(e);
+	} catch (InterruptedException e) {
+	  Thread.currentThread().interrupt();
+	  throw new RuntimeException(e);
+	} catch (ExecutionException | TimeoutException e) {
+	  if (null != task) task.cancel(true);
+	  throw newSQLRuntimeException(e);
+	}
+  }
 
-    @Nonnull
-    @Override
-    public Script print(Consumer<String> printer) {
-        requireNonNull(printer, "Printer must be provided").accept(asSQL());
-        return this;
-    }
+  private long doExecute(Connection connection) throws SQLException {
+	long start = currentTimeMillis();
+	boolean isWarnings = false;
+	Statement statement = null;
+	try {
+	  for (String query : script.split(STATEMENT_DELIMITER)) {
+		boolean isPrepared = !isAnonymous(query);
+		String queryString = query;
+		try {
+		  if (isPrepared) {
+			Map.Entry<String, Object[]> preparedQuery = prepareQuery(query, params);
+			statement = isProcedure(preparedQuery.getKey()) ? connection.prepareCall(preparedQuery.getKey()) : connection.prepareStatement(preparedQuery.getKey());
+			setStatementParameters((PreparedStatement) statement, preparedQuery.getValue());
+			if (logger != null) queryString = Utils.asSQL(preparedQuery.getKey(), preparedQuery.getValue());
+		  } else statement = connection.createStatement();
+		  try {
+			statement.setPoolable(poolable);
+		  } catch (AbstractMethodError ame) {
+			// ignore
+		  }
+		  try {
+			statement.setEscapeProcessing(escaped);
+		  } catch (AbstractMethodError ame) {
+			// ignore
+		  }
+		  if (logger != null) logger.accept(queryString);
+		  if (isPrepared) ((PreparedStatement) statement).execute();
+		  else statement.execute(query);
+		  if (!skipWarnings && statement.getWarnings() != null) {
+			isWarnings = true;
+			throw statement.getWarnings();
+		  }
+		} catch (SQLException e) {
+		  if (!skipErrors && !isWarnings) throw e;
+		  else if (isWarnings && !skipWarnings) throw e;
+		} finally {
+		  isWarnings = false;
+		  if (statement != null) statement.close();
+		}
+	  }
+	} finally {
+	  close();
+	}
+	return currentTimeMillis() - start;
+  }
 
-    @Nonnull
-    @Override
-    public Script skipErrors(boolean skipErrors) {
-        this.skipErrors = skipErrors;
-        return this;
-    }
+  @Nonnull
+  @Override
+  public Script escaped(boolean escapeProcessing) {
+	this.escaped = escapeProcessing;
+	return this;
+  }
 
-    @Nonnull
-    @Override
-    public Script skipWarnings(boolean skipWarnings) {
-        this.skipWarnings = skipWarnings;
-        return this;
-    }
+  @Nonnull
+  @Override
+  public Script print(Consumer<String> printer) {
+	if (null == printer) throw new NullPointerException("Printer must be provided");
+	printer.accept(asSQL());
+	return this;
+  }
 
-    @Nonnull
-    @Override
-    public Script timeout(int timeout, TimeUnit unit) {
-        this.timeout = max(timeout, 0);
-        this.unit = requireNonNull(unit, "Time Unit must be provided");
-        return this;
-    }
+  @Nonnull
+  @Override
+  public Script skipErrors(boolean skipErrors) {
+	this.skipErrors = skipErrors;
+	return this;
+  }
 
-    @Nonnull
-    @Override
-    public Script errorHandler(Consumer<SQLException> handler) {
-        this.errorHandler = requireNonNull(handler, "Error handler must be provided");
-        return this;
-    }
+  @Nonnull
+  @Override
+  public Script skipWarnings(boolean skipWarnings) {
+	this.skipWarnings = skipWarnings;
+	return this;
+  }
 
-    @Override
-    public String toString() {
-        return asSQL();
-    }
+  @Nonnull
+  @Override
+  public Script timeout(int timeout, TimeUnit unit) {
+	this.unit = requireNonNull(unit, "Time Unit must be provided");
+	this.timeout = max(0, timeout);
+	return this;
+  }
 
-    @Nonnull
-    @Override
-    public Script poolable(boolean poolable) {
-        this.poolable = poolable;
-        return this;
-    }
+  @Override
+  public String toString() {
+	return script;
+  }
 
-    @Nonnull
-    @Override
-    public Script verbose(Consumer<String> logger) {
-        this.logger = requireNonNull(logger, "Logger must be provided");
-        return this;
-    }
+  @Nonnull
+  @Override
+  public Script poolable(boolean poolable) {
+	this.poolable = poolable;
+	return this;
+  }
 
-    @Nonnull
-    @Override
-    public String asSQL() {
-        if (query == null) {
-            Map.Entry<String, Object[]> preparedScript = prepareQuery(script, params);
-            query = Utils.asSQL(preparedScript.getKey(), preparedScript.getValue());
-        }
-        return query;
-    }
+  @Nonnull
+  @Override
+  public Script verbose(Consumer<String> logger) {
+	this.logger = requireNonNull(logger, "Logger must be provided");
+	return this;
+  }
 
+  @Nonnull
+  @Override
+  public String asSQL() {
+	return query.updateAndGet(sql -> {
+	  if (sql == null) {
+		Map.Entry<String, Object[]> preparedScript = prepareQuery(script, params);
+		sql = Utils.asSQL(preparedScript.getKey(), preparedScript.getValue());
+	  }
+	  return sql;
+	});
+  }
+
+  void close() {
+	try {
+	  if (null != connectionConsumer) connectionConsumer.accept(connectionInUse);
+	} catch (Throwable e) {
+	  throw newSQLRuntimeException(e);
+	}
+  }
 }

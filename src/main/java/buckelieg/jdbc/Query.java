@@ -23,121 +23,115 @@ import java.util.function.Consumer;
 /**
  * An abstraction for arbitrary SQL query
  *
- * @see AutoCloseable
  * @see Select
  * @see Update
  * @see StoredProcedure
  * @see Script
  */
-public interface Query extends AutoCloseable {
+public interface Query<Q extends Query<Q>> {
 
-    /**
-     * Executes this arbitrary SQL query
-     *
-     * @return an arbitrary query execution result(s)
-     * @see Select#execute()
-     * @see Update#execute()
-     * @see StoredProcedure#execute()
-     * @see Script#execute()
-     */
-    @Nonnull
-    <T> T execute();
+  /**
+   * Executes this arbitrary SQL query
+   *
+   * @return an arbitrary query execution result(s)
+   * @see Select#execute()
+   * @see Update#execute()
+   * @see StoredProcedure#execute()
+   * @see Script#execute()
+   */
+  @Nonnull
+  <T> T execute();
 
-    /**
-     * Tells JDBC driver that this query is poolable
-     *
-     * @param poolable true if this query is poolable, false otherwise
-     * @return a query abstraction
-     * @see java.sql.Statement#setPoolable(boolean)
-     */
-    @Nonnull
-    Query poolable(boolean poolable);
+  /**
+   * Tells JDBC driver if this query is poolable
+   *
+   * @param poolable true if this query is poolable, false otherwise
+   * @return a query abstraction
+   * @see java.sql.Statement#setPoolable(boolean)
+   */
+  @Nonnull
+  Q poolable(boolean poolable);
 
-    /**
-     * Sets query execution timeout
-     * <br/>Negative values are silently ignored
-     *
-     * @param timeout query timeout in seconds greater than 0 (0 means no timeout)
-     * @return a query abstraction
-     * @see java.sql.Statement#setQueryTimeout(int)
-     */
-    @Nonnull
-    default Query timeout(int timeout) {
-        return timeout(timeout, TimeUnit.SECONDS);
-    }
+  /**
+   * Sets query execution timeout (in seconds)
+   * <br/>Negative values are silently ignored
+   *
+   * @param timeout query timeout in seconds greater than 0 (0 means no timeout)
+   * @return a query abstraction
+   * @see java.sql.Statement#setQueryTimeout(int)
+   */
+  @Nonnull
+  default Q timeout(int timeout) {
+	return timeout(timeout, TimeUnit.SECONDS);
+  }
 
-    /**
-     * Sets query execution timeout
-     * <br/>Negative values are silently ignored
-     * <br/>TimeUnit is converted to seconds
-     *
-     * @param timeout query timeout in seconds greater than 0 (0 means no timeout)
-     * @param unit a time unit
-     * @return a query abstraction
-     * @see #timeout(int)
-     * @see TimeUnit
-     */
-    @Nonnull
-    Query timeout(int timeout, TimeUnit unit);
+  /**
+   * Sets query execution timeout
+   * <br/>Negative values are silently ignored
+   * <br/>TimeUnit is converted to seconds
+   *
+   * @param timeout query timeout in seconds greater than 0 (0 means no timeout)
+   * @param unit    a time unit
+   * @return a query abstraction
+   * @throws NullPointerException if <code>unit</code> is null
+   * @see #timeout(int)
+   * @see TimeUnit
+   */
+  @Nonnull
+  Q timeout(int timeout, TimeUnit unit);
 
-    /**
-     * Sets escape processing for this query
-     *
-     * @param escapeProcessing true (the default) if escape processing is enabled, false - otherwise
-     * @return a query abstraction
-     * @see java.sql.Statement#setEscapeProcessing(boolean)
-     */
-    @Nonnull
-    Query escaped(boolean escapeProcessing);
+  /**
+   * Sets escape processing for this query
+   *
+   * @param escapeProcessing true (the default) if escape processing is enabled, false - otherwise
+   * @return a query abstraction
+   * @see java.sql.Statement#setEscapeProcessing(boolean)
+   */
+  @Nonnull
+  Q escaped(boolean escapeProcessing);
 
 
-    /**
-     * Sets flag whether to skip on warnings or not
-     *
-     * @param skipWarnings true (the default) if to skip warning, false - otherwise
-     * @return a query abstraction
-     */
-    @Nonnull
-    Query skipWarnings(boolean skipWarnings);
+  /**
+   * Sets flag whether to skip on warnings or not
+   *
+   * @param skipWarnings true (the default) if to skip warnings, false - otherwise
+   * @return a query abstraction
+   * @implNote default value is <code>true</code>
+   */
+  @Nonnull
+  Q skipWarnings(boolean skipWarnings);
 
-    /**
-     * Prints this query string (as SQL) to provided logger
-     * <br/>All parameters are substituted by calling theirs' <code>toString()</code> methods
-     *
-     * @param printer query string consumer
-     * @return a query abstraction
-     */
-    @Nonnull
-    Query print(Consumer<String> printer);
+  /**
+   * Prints this query string (as SQL) to provided logger
+   * <br/>All parameters are substituted by calling theirs' <code>toString()</code> methods
+   *
+   * @param printer query string consumer
+   * @return a query abstraction
+   * @throws NullPointerException if <code>printer</code> is null
+   */
+  @Nonnull
+  Q print(Consumer<String> printer);
 
-    /**
-     * Prints this query string (as SQL) to standard output
-     * <br/>All parameters are substituted by calling theirs' <code>toString()</code> methods
-     *
-     * @return a query abstraction
-     * @see System#out
-     * @see PrintStream#println
-     */
-    @Nonnull
-    default Query print() {
-        return print(System.out::println);
-    }
+  /**
+   * Prints this query string (as SQL) to standard output
+   * <br/>All parameters are substituted by calling theirs' <code>toString()</code> methods
+   *
+   * @return a query abstraction
+   * @see System#out
+   * @see PrintStream#println
+   */
+  @Nonnull
+  default Q print() {
+	return print(System.out::println);
+  }
 
-    /**
-     * Represents this <code>query</code> AS <code>SQL</code> string
-     * <br/>All parameters are substituted by calling theirs' <code>toString()</code> methods
-     *
-     * @return this query as a SQL string
-     */
-    @Nonnull
-    String asSQL();
+  /**
+   * Represents this <code>query</code> AS <code>SQL</code> string
+   * <br/>All parameters are substituted by calling theirs' <code>toString()</code> methods
+   *
+   * @return this query as a SQL string
+   */
+  @Nonnull
+  String asSQL();
 
-    /**
-     * Closes this query
-     *
-     * @see AutoCloseable#close()
-     */
-    @Override
-    default void close() {
-    }
 }

@@ -15,656 +15,265 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryConsumer;
 import buckelieg.jdbc.fn.TryFunction;
 import buckelieg.jdbc.fn.TrySupplier;
 
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import javax.annotation.ParametersAreNonnullByDefault;
 import javax.annotation.concurrent.ThreadSafe;
-import javax.sql.DataSource;
-import java.io.File;
-import java.nio.charset.Charset;
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.concurrent.*;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.BiFunction;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
-import static buckelieg.jdbc.Utils.*;
-import static java.lang.String.format;
-import static java.nio.charset.StandardCharsets.UTF_8;
-import static java.nio.file.Files.readAllBytes;
-import static java.util.AbstractMap.SimpleImmutableEntry;
-import static java.util.Arrays.asList;
-import static java.util.Arrays.stream;
+import static java.lang.Math.max;
 import static java.util.Objects.requireNonNull;
-import static java.util.stream.Collectors.toList;
-import static java.util.stream.Stream.of;
 
 /**
- * Database query factory
+ * Database query and session factory
  *
- * @see AutoCloseable
- * @see Query
- * @see Select
- * @see Update
- * @see StoredProcedure
- * @see Script
+ * @see Session
+ * @see Transaction
  */
 @ThreadSafe
 @ParametersAreNonnullByDefault
-public final class DB implements AutoCloseable {
+public final class DB extends Session {
 
-    private final Lock lock = new ReentrantLock();
-    private final Condition condition = lock.newCondition();
+  private final Supplier<String> txIdProvider;
 
-    private Connection connection;
-    private final TrySupplier<Connection, SQLException> connectionSupplier;
-    private ExecutorService conveyor;
-    private boolean shutdownConveyor = true;
-    private Boolean canCreateNewConnection = null;
-    private final ConcurrentMap<String, RSMeta.Column> metaCache;
-    private TryConsumer<Connection, SQLException> onCommit;
-    private boolean isTransactionRunning = false;
+  private final ConnectionManager connectionManager;
 
-    DB(Connection connection) {
-        this(() -> connection);
-        this.canCreateNewConnection = false;
-    }
+  private final Supplier<ExecutorService> executorServiceProvider;
 
-    private DB(
-            ExecutorService conveyor,
-            ConcurrentMap<String, RSMeta.Column> metaCache,
-            Connection connection,
-            TrySupplier<Connection, SQLException> connectionSupplier,
-            boolean isTransactionRunning,
-            Boolean canCreate,
-            TryConsumer<Connection, SQLException> onCommit
-    ) {
-        this.connection = connection;
-        this.connectionSupplier = connectionSupplier;
-        this.conveyor = conveyor;
-        this.metaCache = metaCache;
-        this.shutdownConveyor = false;
-        this.canCreateNewConnection = canCreate;
-        this.isTransactionRunning = isTransactionRunning;
-        this.onCommit = onCommit;
-    }
+  private final AtomicReference<ExecutorService> conveyor = new AtomicReference<>();
 
-    /**
-     * Creates DB with connection supplier
-     * <br/>This caches provided connection and tries to create new if previous one is closed
-     *
-     * @param connectionSupplier the connection supplier.
-     * @throws NullPointerException if connection provider is null
-     */
-    public DB(TrySupplier<Connection, SQLException> connectionSupplier) {
-        requireNonNull(connectionSupplier, "Connection supplier must be provided");
-        this.connectionSupplier = connectionSupplier;
-        this.conveyor = getConveyor();
-        this.metaCache = new ConcurrentHashMap<>();
-    }
+  private final boolean terminateConveyorOnClose;
 
-    /**
-     * Creates DB with provided <code>DataSource</code>
-     * <br/>This will use <code>getConnection()</code> method to obtain a connection
-     *
-     * @param ds the DataSource
-     * @see DataSource#getConnection()
-     */
-    public DB(DataSource ds) {
-        this(ds::getConnection);
-        this.canCreateNewConnection = true;
-    }
+  private DB(
+		  Map<String, RSMeta.Column> metaCache,
+		  Supplier<String> txIdProvider,
+		  ConnectionManager connectionManager,
+		  Supplier<ExecutorService> executorServiceSupplier,
+		  boolean terminateConveyorOnClose) {
+	super(metaCache, connectionManager::getConnection, connectionManager::close, executorServiceSupplier);
+	this.txIdProvider = txIdProvider;
+	this.connectionManager = connectionManager;
+	this.executorServiceProvider = () -> getExecutorService(executorServiceSupplier);
+	this.terminateConveyorOnClose = terminateConveyorOnClose;
+  }
 
-    /**
-     * Closes underlying connection
-     *
-     * @throws SQLRuntimeException if something went wrong
-     */
-    @Override
-    public void close() {
-        collectAndThrow(
-                () -> {
-                    if (connection != null && !connection.isClosed()) {
-                        connection.close();
-                        connection = null;
-                    }
-                },
-                () -> {
-                    if (conveyor != null && shutdownConveyor) {
-                        conveyor.shutdown();
-                        conveyor.awaitTermination(1, TimeUnit.MINUTES);
-                    }
-                }
-        );
-    }
+  private ExecutorService getExecutorService(Supplier<ExecutorService> executorServiceSupplier) {
+	return conveyor.updateAndGet(conveyor -> {
+	  if (conveyor == null || conveyor.isShutdown() || conveyor.isTerminated()) {
+		conveyor = requireNonNull(executorServiceSupplier.get(), "Executor service instance must be provided");
+	  }
+	  return conveyor;
+	});
+  }
 
-    /**
-     * Executes an arbitrary parameterized SQL statement
-     * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters
-     *
-     * @param query           an SQL query to execute
-     * @param namedParameters query named parameters in the form of :name
-     * @return select query
-     * @throws IllegalArgumentException either if query string is a procedure call statement or it is not a single SQL statement
-     * @see Select
-     */
-    @Nonnull
-    public Query query(String query, Map<String, ?> namedParameters) {
-        return query(query, namedParameters.entrySet());
-    }
+  /**
+   * Creates a transaction for the set of an arbitrary statements
+   * <br/>Example usage:
+   * <pre>{@code
+   *  // suppose we have to create a bunch of new users with provided names and get the latest one with all it's attributes filled in
+   *  DB db = // create DB instance
+   *  User latestUser = db.transaction().isolation(Transaction.Isolation.SERIALIZABLE).apply(session ->
+   *      session.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
+   *        .skipWarnings(false)
+   *        .timeout(1, TimeUnit.MINUTES)
+   *        .print() // prints to System.out
+   *        .execute(rs -> rs.getLong(1)) // returns a java.util.List of generated ids
+   *        .stream()
+   *        .peek(id -> session.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call())
+   *        .max(Comparator.comparing(i -> i))
+   *        .flatMap(id -> session.select("SELECT * FROM users WHERE id=?", id).print().single(rs -> {
+   *              User u = new User();
+   *              u.setId(rs.getLong("id"));
+   *              u.setName(rs.getString("name"));
+   *              // ...fill other user's attributes...
+   *              return user;
+   *        }))
+   *        .orElse(null)
+   * );
+   * }</pre>
+   *
+   * @return an arbitrary result
+   * @throws NullPointerException          if no action or isolation level is provided
+   * @throws UnsupportedOperationException if <code>createNew</code> is <code>true</code> but provided <code>connectionSupplier</code> cannot create new connection
+   * @throws IllegalArgumentException      if desired transaction isolation level is not supported
+   * @see Transaction.Isolation
+   * @see TryFunction
+   */
+  @Nonnull
+  public Transaction transaction() {
+	return new JDBCTransaction(executorServiceProvider, txIdProvider, metaCache, connectionManager::getConnection, connectionManager::close);
+  }
 
-    /**
-     * Executes an arbitrary SQL statement with named parameters
-     * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters
-     *
-     * @param query           an arbitrary SQL query to execute
-     * @param namedParameters query named parameters in the form of :name
-     * @return select query
-     * @throws IllegalArgumentException either if query string is a procedure call statement or it is not a single SQL statement
-     * @see Select
-     */
-    @SafeVarargs
-    @Nonnull
-    public final <T extends Entry<String, ?>> Query query(String query, T... namedParameters) {
-        return query(query, asList(namedParameters));
-    }
+  /**
+   * Closes this instance of DB. This includes:<br/>
+   * <ul>
+   *     <li>closing underlying connection(s) pool {@linkplain ConnectionManager#close()}</li>
+   *     <li>closing underlying executor service (if requested: {@linkplain DB.Builder#withTerminateExecutorServiceOnClose(boolean)})</li>
+   * </ul>
+   *
+   * @throws SQLRuntimeException if something went wrong
+   */
+  public void close() {
+	if (null != conveyor && terminateConveyorOnClose) {
+	  Optional.ofNullable(conveyor.get()).ifPresent(ExecutorService::shutdownNow);
+	}
+	try {
+	  connectionManager.close();
+	} catch (SQLException e) {
+	  throw Utils.newSQLRuntimeException(e);
+	}
+  }
 
-    /**
-     * Executes a set of an arbitrary SQL statement(s)
-     *
-     * @param script          (a series of) SQL statement(s) to execute
-     * @param namedParameters named parameters to be used in the script
-     * @return script query abstraction
-     * @throws NullPointerException if script is null
-     * @see Script
-     */
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    @Nonnull
-    public final Script script(String script, Map<String, ?> namedParameters) {
-        return new ScriptQuery(lock, condition, getConveyor(), metaCache, getConnectionSupplier(false), cutComments(requireNonNull(script, "SQL script must be provided")), namedParameters.entrySet());
-    }
+  /**
+   * A DB instance builder
+   */
+  @ParametersAreNonnullByDefault
+  public static final class Builder {
 
-    /**
-     * Executes a set of an arbitrary SQL statement(s)
-     *
-     * @param script          (a series of) SQL statement(s) to execute
-     * @param namedParameters named parameters to be used in the script
-     * @return script query abstraction
-     * @throws NullPointerException if script is null
-     * @see Script
-     */
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    @SafeVarargs
-    @Nonnull
-    public final <T extends Entry<String, ?>> Script script(String script, T... namedParameters) {
-        return new ScriptQuery(lock, condition, getConveyor(), metaCache, getConnectionSupplier(false), cutComments(requireNonNull(script, "SQL script must be provided")), asList(namedParameters));
-    }
+	private Supplier<String> txIdProvider = () -> UUID.randomUUID().toString();
 
-    /**
-     * Executes an arbitrary SQL statement(s) with default encoding (<code>Charset.UTF_8</code>)
-     *
-     * @param source          file with a SQL script contained to execute
-     * @param namedParameters named parameters to be used in the script
-     * @return script query abstraction
-     * @throws RuntimeException in case of any errors (like {@link java.io.FileNotFoundException} or source file is null)
-     * @see #script(File, Charset, Entry[])
-     */
-    @SafeVarargs
-    @Nonnull
-    public final <T extends Entry<String, ?>> Script script(File source, T... namedParameters) {
-        return script(source, UTF_8, namedParameters);
-    }
+	private Supplier<ExecutorService> executorServiceSupplier = Executors::newWorkStealingPool;
 
-    /**
-     * Executes an arbitrary SQL statement(s)
-     *
-     * @param source          file with a SQL script contained
-     * @param encoding        source file encoding to be used
-     * @param namedParameters named parameters to be used in the script
-     * @return script query abstraction
-     * @throws RuntimeException in case of any errors (like {@link java.io.FileNotFoundException} or source file is null)
-     * @see #script(String, Entry[])
-     * @see Charset
-     */
-    @SafeVarargs
-    @Nonnull
-    public final <T extends Entry<String, ?>> Script script(File source, Charset encoding, T... namedParameters) {
-        try {
-            return script(new String(readAllBytes(requireNonNull(source, "Source file must be provided").toPath()), requireNonNull(encoding, "File encoding must be provided")), namedParameters);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
+	private int maxConnections = Runtime.getRuntime().availableProcessors();
 
-    /**
-     * Calls stored procedure
-     *
-     * @param query procedure call string to execute
-     * @return stored procedure call
-     * @see StoredProcedure
-     * @see #procedure(String, P[])
-     */
-    @Nonnull
-    public StoredProcedure procedure(String query) {
-        return procedure(query, new Object[0]);
-    }
+	private boolean terminateExecutorServiceOnClose = false;
 
-    /**
-     * Calls stored procedure
-     * <br/>Supplied parameters are considered as IN parameters
-     *
-     * @param query      procedure call string to execute
-     * @param parameters procedure IN parameters' values
-     * @return stored procedure call
-     * @see StoredProcedure
-     * @see #procedure(String, P[])
-     */
-    @Nonnull
-    public StoredProcedure procedure(String query, Object... parameters) {
-        return procedure(query, stream(parameters).map(P::in).collect(toList()).toArray(new P<?>[parameters.length]));
-    }
+	private ConnectionManager connectionManager;
 
-    /**
-     * Calls stored procedure
-     * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters
-     * <br/>Named parameters order must match parameters type of the procedure called
-     *
-     * @param query      procedure call string to execute
-     * @param parameters procedure parameters as declared (IN/OUT/INOUT)
-     * @return stored procedure call
-     * @throws IllegalArgumentException if provided query is not valid DML statement or named parameters provided along with unnamed ones
-     * @see StoredProcedure
-     */
-    @Nonnull
-    public StoredProcedure procedure(String query, P<?>... parameters) {
-        query = checkSingle(requireNonNull(query, "SQL query must be provided"));
-        if (isAnonymous(query) && !isProcedure(query)) {
-            throw new IllegalArgumentException(format("Query '%s' is not valid procedure call statement", query));
-        } else {
-            int namedParams = (int) of(parameters).filter(p -> !p.getName().isEmpty()).count();
-            if (namedParams == parameters.length && parameters.length > 0) {
-                Entry<String, Object[]> preparedQuery = prepareQuery(
-                        query,
-                        of(parameters)
-                                .map(p -> new SimpleImmutableEntry<>(p.getName(), new P<?>[]{p}))
-                                .collect(toList())
-                );
-                query = preparedQuery.getKey();
-                parameters = stream(preparedQuery.getValue()).map(p -> (P<?>) p).toArray(P[]::new);
-            } else if (0 < namedParams && namedParams < parameters.length) {
-                throw new IllegalArgumentException(
-                        format(
-                                "Cannot combine named parameters(count=%s) with unnamed ones(count=%s).",
-                                namedParams, parameters.length - namedParams
-                        )
-                );
-            }
-        }
-//        String finalQuery = query;
-        return new StoredProcedureQuery(lock, condition, isTransactionRunning, getConveyor(), metaCache, getConnectionSupplier(false), () -> {
-            if (!isTransactionRunning) {
-                connection.setAutoCommit(true);
-            }
-//            System.out.printf("onCompleted DB.procedure: %s%n", finalQuery);
-        }, query, parameters);
-    }
+	private Builder() {
+	}
 
-    /**
-     * Executes SELECT statement
-     *
-     * @param query SELECT query to execute
-     * @return select query
-     * @throws IllegalArgumentException if provided query is a procedure call statement
-     * @see Select
-     */
-    @Nonnull
-    public Select select(String query) {
-        return select(query, new Object[0]);
-    }
+	/**
+	 * Configures a {@linkplain DB} instance with transaction id provider function provided<br/>
+	 * Default generator uses {@linkplain UUID#randomUUID()} to provide a string representation of an id
+	 *
+	 * @param txIdProvider transaction ID provider function
+	 * @return a {@linkplain Builder} instance
+	 * @throws NullPointerException if {@code txIdProvider} is null
+	 */
+	@Nonnull
+	public Builder withTransactionIdProvider(Supplier<String> txIdProvider) {
+	  this.txIdProvider = requireNonNull(txIdProvider, "Transaction ID provider function must be provided");
+	  return this;
+	}
 
-    /**
-     * Executes SELECT statement
-     *
-     * @param query      SELECT query to execute
-     * @param parameters query parameters in the declared order of '?'
-     * @return select query
-     * @throws IllegalArgumentException if provided query is a procedure call statement
-     * @see Select
-     */
-    @Nonnull
-    public Select select(String query, Object... parameters) {
-        requireNonNull(query, "SQL query must be provided");
-        if (isProcedure(query)) {
-            throw new IllegalArgumentException(format("Query '%s' is not valid select statement", query));
-        }
-        return new SelectQuery(lock, condition, isTransactionRunning, getConveyor(), metaCache, getConnectionSupplier(false), () -> {
-            if (!isTransactionRunning) {
-                connection.setAutoCommit(true);
-            }
-//            System.out.printf("onCompleted DB.select: %s%n", query);
-        }, checkAnonymous(checkSingle(query)), parameters);
-    }
+	/**
+	 * Configures a {@linkplain DB} instance with executor service provider function provided<br/>
+	 * Default provider is {@linkplain Executors#newWorkStealingPool()}
+	 *
+	 * @param executorServiceProvider an {@linkplain ExecutorService} provider function
+	 * @return a {@linkplain Builder} instance
+	 * @throws NullPointerException if {@code executorServiceProvider} is null
+	 */
+	@Nonnull
+	public Builder withExecutorServiceProvider(Supplier<ExecutorService> executorServiceProvider) {
+	  this.executorServiceSupplier = requireNonNull(executorServiceProvider, "Executor service must be provided");
+	  return this;
+	}
 
+	/**
+	 * Configures a {@linkplain DB} instance with executor service termination on close value provided<br/>
+	 * Default is {@code false}
+	 *
+	 * @param terminateExecutorServiceOnClose if {@code true} - then {@linkplain ExecutorService} will be attempted to shutdown on {@linkplain DB#close()} method invocation
+	 * @return a {@linkplain Builder} instance
+	 */
+	@Nonnull
+	public Builder withTerminateExecutorServiceOnClose(boolean terminateExecutorServiceOnClose) {
+	  this.terminateExecutorServiceOnClose = terminateExecutorServiceOnClose;
+	  return this;
+	}
 
-    /**
-     * Executes DML statements: INSERT, UPDATE or DELETE
-     *
-     * @param query INSERT/UPDATE/DELETE query to execute
-     * @param batch an array of query parameters on the declared order of '?'
-     * @return update query
-     * @throws IllegalArgumentException if provided query is a procedure call statement
-     * @see Update
-     */
-    @Nonnull
-    public Update update(String query, Object[]... batch) {
-        requireNonNull(query, "SQL query must be provided");
-        if (isProcedure(query)) {
-            throw new IllegalArgumentException(format("Query '%s' is not valid DML statement", query));
-        }
-        return new UpdateQuery(lock, condition, isTransactionRunning, getConveyor(), getConnectionSupplier(false), checkAnonymous(checkSingle(query)), batch);
-    }
+	/**
+	 * Configures a {@linkplain DB} instance with connection manager instance provided<br/>
+	 *
+	 * @param connectionManager a connection manager instance
+	 * @return a {@linkplain Builder} instance
+	 * @throws NullPointerException if {@code connectionManager} is null
+	 */
+	@Nonnull
+	public Builder withConnectionManager(ConnectionManager connectionManager) {
+	  this.connectionManager = requireNonNull(connectionManager, "Connection manager must be provided");
+	  return this;
+	}
 
-    /**
-     * Executes a single SQL query
-     *
-     * @param query      a single arbitrary SQL query to execute
-     * @param parameters query parameters in the declared order of '?'
-     * @return an SQL query abstraction
-     * @throws IllegalArgumentException either if query string is a procedure call statement or it is not a single SQL statement
-     */
-    @Nonnull
-    public Query query(String query, Object... parameters) {
-        requireNonNull(query, "SQL query must be provided");
-        if (isProcedure(query)) {
-            throw new IllegalArgumentException(format("Query '%s' is not valid SQL statement", query));
-        }
-        return new QueryImpl(lock, condition, getConveyor(), getConnectionSupplier(false), checkAnonymous(checkSingle(query)), parameters);
-    }
+	/**
+	 * Configures a {@linkplain DB} instance with an upper limit of obtained (by this {@linkplain DB} instance) connections count<br/>
+	 * Default value is {@linkplain Runtime#availableProcessors()}
+	 *
+	 * @param count maximum connection to obtain (values less than {@code 1} are silently ignored)
+	 * @return a {@linkplain Builder} instance
+	 */
+	@Nonnull
+	public Builder withMaxConnections(int count) {
+	  this.maxConnections = max(1, count);
+	  return this;
+	}
 
-    /**
-     * Executes SELECT statement
-     * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters
-     *
-     * @param query           SELECT query to execute
-     * @param namedParameters query named parameters in the form of :name
-     * @return select query
-     * @throws IllegalArgumentException if provided query is a procedure call statement
-     * @see Select
-     */
-    @Nonnull
-    public Select select(String query, Map<String, ?> namedParameters) {
-        return select(query, namedParameters.entrySet());
-    }
+	/**
+	 * Builds a new <code>DB</code> instance with provided connection supplier function<br/>
+	 * Example:
+	 * <pre>{@code
+	 * DataSource ds = // obtain datasource instance (via JNDI, DriverManager etc.)
+	 * DB db = DB.builder().build(ds::getConnection);
+	 * // or
+	 * DB db = DB.builder.build(() -> DriverManager.getConnection("jdbcURL"))
+	 * }</pre>
+	 *
+	 * @param connectionProvider a function that returns a connection to database
+	 * @return a new {@linkplain DB} instance. Never null
+	 * @throws NullPointerException if {@code connectionProvider} is null
+	 */
+	@Nonnull
+	public DB build(TrySupplier<Connection, SQLException> connectionProvider) {
+	  requireNonNull(connectionProvider, "Connection provider function must be provided");
+	  return new DB(
+			  new ConcurrentHashMap<>(),
+			  txIdProvider,
+			  null == connectionManager ? new DefaultConnectionManager(connectionProvider, maxConnections) : connectionManager,
+			  executorServiceSupplier,
+			  terminateExecutorServiceOnClose
+	  );
+	}
+  }
 
-    /**
-     * Executes SELECT statement with named parameters
-     * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters
-     *
-     * @param query           SELECT query to execute
-     * @param namedParameters query named parameters in the form of :name
-     * @return select query
-     * @throws IllegalArgumentException if provided query is a procedure call statement
-     * @see Select
-     */
-    @SafeVarargs
-    @Nonnull
-    public final <T extends Entry<String, ?>> Select select(String query, T... namedParameters) {
-        return select(query, asList(namedParameters));
-    }
+  /**
+   * Creates a new builder instance
+   *
+   * @return a new {@code Builder} instance. Never null
+   */
+  @Nonnull
+  public static Builder builder() {
+	return new Builder();
+  }
 
-    /**
-     * Executes statements: INSERT, UPDATE or DELETE
-     *
-     * @param query INSERT/UPDATE/DELETE query to execute
-     * @return update query
-     * @throws IllegalArgumentException if provided query is a procedure call statement
-     * @see Update
-     */
-    @Nonnull
-    public Update update(String query) {
-        return update(query, new Object[0]);
-    }
-
-    /**
-     * Executes statements: INSERT, UPDATE or DELETE
-     *
-     * @param query      INSERT/UPDATE/DELETE query to execute
-     * @param parameters query parameters on the declared order of '?'
-     * @return update query
-     * @throws IllegalArgumentException if provided query is a procedure call statement
-     * @see Update
-     */
-    @Nonnull
-    public Update update(String query, Object... parameters) {
-        return update(query, new Object[][]{parameters});
-    }
-
-    /**
-     * Executes statements: INSERT, UPDATE or DELETE
-     * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters
-     *
-     * @param query           INSERT/UPDATE/DELETE query to execute
-     * @param namedParameters query named parameters in the form of :name
-     * @return update query
-     * @throws IllegalArgumentException if provided query is a procedure call statement
-     * @see Update
-     */
-    @SafeVarargs
-    @Nonnull
-    public final <T extends Entry<String, ?>> Update update(String query, T... namedParameters) {
-        return update(query, asList(namedParameters));
-    }
-
-    /**
-     * Executes statements: INSERT, UPDATE or DELETE
-     * <br/>Parameter names are CASE SENSITIVE!
-     * <br/>So that :NAME and :name are two different parameters
-     *
-     * @param query INSERT/UPDATE/DELETE query to execute
-     * @param batch an array of query named parameters in the form of :name
-     * @return update query
-     * @throws IllegalArgumentException if provided query is a procedure call statement
-     * @see Update
-     */
-    @SafeVarargs
-    @Nonnull
-    public final Update update(String query, Map<String, ?>... batch) {
-        List<Entry<String, Object[]>> params = of(batch).map(np -> prepareQuery(query, np.entrySet())).collect(toList());
-        return update(params.get(0).getKey(), params.stream().map(Entry::getValue).collect(toList()).toArray(new Object[params.size()][]));
-    }
-
-    /**
-     * Creates a transaction for the set of an arbitrary statements with specified isolation level
-     * <br/>Example usage:
-     * <pre>{@code
-     *  // suppose we have to create a bunch of new users with provided names and get the latest with all it's attributes filled in
-     *  DB db = new DB(ds);
-     *  User latestUser = db.transaction(false, TransactionIsolation.SERIALIZABLE, db1 ->
-     *      // here db.equals(db1) will return true
-     *      // but if we claim to createNew transaction it will not, because a new connection is obtained and new DB instance is created
-     *      // so everything inside a transaction MUST be done through db1 reference since it will operate on newly created connection.
-     *      // as the rule of thumb - always use lambda parameter to do the things inside transaction
-     *      db1.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
-     *        .skipWarnings(false)
-     *        .timeout(1, TimeUnit.MINUTES)
-     *        .print()
-     *        .execute(
-     *              rs -> rs.getLong(1),
-     *              keys -> db1.select("SELECT * FROM users WHERE id=?", keys.peek(id -> db1.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call()).max(Comparator.comparing(i -> i)).orElse(-1L))
-     *                         .print()
-     *                         .single(rs -> {
-     *                              User u = new User();
-     *                              u.setId(rs.getLong("id"));
-     *                              u.setName(rs.getString("name"));
-     *                              //... fill other user's attributes...
-     *                              return user;
-     *                          })
-     *                  );
-     *          )
-     *          .orElse(null);
-     * }</pre>
-     * Note that return value must not be an opened cursor, so that code below will throw an exception of Invalid transaction state - held cursor requires same isolation level:
-     * <pre>{@code Stream<String> stream = db.transaction(false, TransactionIsolation.SERIALIZABLE, () -> db.select("SELECT * FROM my_table").execute(rs -> rs.getString(1)));
-     * stream.collect(Collectors.toList());}</pre>
-     * Unless desired isolation level matches the RDBMS default one
-     * <br/>If transaction isolation level is not supported by RDBMS then default one will be used
-     *
-     * @param createNew whether to create new transaction (implies obtaining new connection if possible) or not.
-     * @param level     transaction isolation level (null -> default)
-     * @param action    an action to be performed in transaction
-     * @return an arbitrary result
-     * @throws NullPointerException          if no action or isolation level is provided
-     * @throws UnsupportedOperationException if <code>createNew</code> is <code>true</code> but provided <code>connectionSupplier</code> cannot create new connection
-     * @throws IllegalArgumentException      if desired transaction isolation level is not supported
-     * @see TransactionIsolation
-     * @see TryFunction
-     */
-    @Nullable
-    public <T> T transaction(boolean createNew, TransactionIsolation level, TryFunction<DB, T, SQLException> action) {
-        return doInTransaction(createNew, requireNonNull(level, "Transaction isolation level must be provided"), action);
-    }
-
-    /**
-     * Creates a transaction for the set of an arbitrary statements with default isolation level
-     *
-     * @param createNew whether to create new transaction (implies getting new connection if possible) or not.
-     * @param action    an action to be performed in transaction
-     * @return an arbitrary result
-     * @throws NullPointerException          if no action is provided
-     * @throws UnsupportedOperationException if new connection (if requested) could not be created
-     * @see #transaction(boolean, TransactionIsolation, TryFunction)
-     */
-    @Nullable
-    public <T> T transaction(boolean createNew, TryFunction<DB, T, SQLException> action) {
-        return doInTransaction(createNew, null, action);
-    }
-
-    /**
-     * Creates a transaction for the set of an arbitrary statements with default isolation level within the same connection (<code>createNew</code> set to <code>false</code>)
-     *
-     * @param action an action to be performed in transaction
-     * @return an arbitrary result
-     * @throws NullPointerException if no action is provided
-     * @see #transaction(boolean, TryFunction)
-     */
-    @Nullable
-    public <T> T transaction(TryFunction<DB, T, SQLException> action) {
-        return transaction(false, action);
-    }
-
-    /**
-     * Creates a transaction within the current connection with provided {@link TransactionIsolation} level.
-     *
-     * @param isolationLevel transaction isolation level to set
-     * @param action         an action to be dne in transaction
-     * @return an arbitrary result
-     * @throws NullPointerException     if no action or isolation level is provided
-     * @throws IllegalArgumentException desired transaction isolation level is not supported
-     * @see #transaction(boolean, TransactionIsolation, TryFunction)
-     */
-    @Nullable
-    public <T> T transaction(TransactionIsolation isolationLevel, TryFunction<DB, T, SQLException> action) {
-        return transaction(false, isolationLevel, action);
-    }
-
-    @Nullable
-    private <T> T doInTransaction(boolean createNew, @Nullable TransactionIsolation level, TryFunction<DB, T, SQLException> action) {
-        try {
-            return Utils.doInTransaction(
-                    createNew && connection != null, getConnectionSupplier(createNew), level,
-                    conn -> requireNonNull(action, "Action must be provided").apply(new DB(
-                            getConveyor(), metaCache, conn, connectionSupplier, true, canCreateNewConnection,
-                            onCommit == null ? Connection::commit : c -> onCommit.compose(Connection::commit).accept(c)
-                    ))
-            );
-        } catch (SQLException e) {
-            throw newSQLRuntimeException(e);
-        }
-    }
-
-    private Select select(String query, Iterable<? extends Entry<String, ?>> namedParams) {
-        return prepare(query, namedParams, this::select);
-    }
-
-    private Update update(String query, Iterable<? extends Entry<String, ?>> namedParams) {
-        return prepare(query, namedParams, this::update);
-    }
-
-    private Query query(String query, Iterable<? extends Entry<String, ?>> namedParams) {
-        return prepare(query, namedParams, this::query);
-    }
-
-    private <T extends Query> T prepare(String query, Iterable<? extends Entry<String, ?>> namedParams, BiFunction<String, Object[], T> toQuery) {
-        Entry<String, Object[]> preparedQuery = prepareQuery(cutComments(query), namedParams);
-        return toQuery.apply(preparedQuery.getKey(), preparedQuery.getValue());
-    }
-
-    private TrySupplier<Connection, SQLException> getConnectionSupplier(boolean forceNew) {
-        return () -> {
-            if (forceNew) {
-                synchronized (this) {
-                    if (canCreateNewConnection != null && canCreateNewConnection) {
-                        connection = requireNonNull(connectionSupplier.get(), "Connection supplier must provide a connection");
-                        System.out.printf("Opening new connection(canCreateNewConnection != null && canCreateNewConnection): %s%n", connection);
-                    } else {
-                        if (canCreateNewConnection == null) {
-                            Connection newConnection = requireNonNull(connectionSupplier.get(), "Connection supplier must provide a connection");
-                            System.out.printf("Opening new connection(canCreateNewConnection == null): %s%n", newConnection);
-                            if (connection != null && connection == newConnection) {
-                                canCreateNewConnection = false;
-                                throw new UnsupportedOperationException("No new connection created");
-                            }
-                            if (newConnection.isClosed()) {
-                                throw new SQLException("Provided connection is already closed");
-                            }
-                            canCreateNewConnection = true;
-                            connection = newConnection;
-                        } else {
-                            throw new UnsupportedOperationException("No new connection created");
-                        }
-                    }
-                }
-            } else {
-                if (connection == null || connection.isClosed()) {
-                    synchronized (this) {
-                        if (connection == null || connection.isClosed()) {
-                            connection = requireNonNull(connectionSupplier.get(), "Connection supplier must provide a connection");
-                            System.out.printf("Opening new connection(connection == null || connection.isClosed()): %s%n", connection);
-                            if (connection.isClosed()) {
-                                throw new SQLException("Provided connection is already closed");
-                            }
-                        }
-                    }
-                }
-            }
-            return connection;
-        };
-    }
-
-    private ExecutorService getConveyor() {
-        if (conveyor == null || conveyor.isShutdown() || conveyor.isTerminated()) {
-            synchronized (this) {
-                if (conveyor == null || conveyor.isShutdown() || conveyor.isTerminated()) {
-                    conveyor = Executors.newWorkStealingPool();
-                }
-            }
-        }
-        return conveyor;
-    }
+  /**
+   * An alias for <pre>{@code DB.builder().build(connectionProvider)}</pre>
+   * This implies next defaults:<br/>
+   * <ul>
+   *     <li>Transaction ID provider: {@linkplain UUID#randomUUID()}</li>
+   *     <li>Executor service provider: {@linkplain Executors#newWorkStealingPool}</li>
+   *     <li>Maximum acquired connection limit: {@linkplain Runtime#availableProcessors()}</li>
+   * </ul>
+   *
+   * @param connectionProvider a connection supplier function
+   * @return a new DB instance. Never null
+   * @throws NullPointerException if {@code connectionProvider} is null
+   */
+  @Nonnull
+  public static DB create(TrySupplier<Connection, SQLException> connectionProvider) {
+	return DB.builder().build(connectionProvider);
+  }
 
 }

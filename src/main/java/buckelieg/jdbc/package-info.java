@@ -13,14 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 /**
  * Functional style programming over plain JDBC
- * <br/>Two main classes to use:
- * <br/><code>DB</code> - for full-featured usage
- * <br/><code>Queries</code> - for simple cases usage
  *
  * @see buckelieg.jdbc.DB
- * @see buckelieg.jdbc.Queries
  *
  */
 package buckelieg.jdbc;
