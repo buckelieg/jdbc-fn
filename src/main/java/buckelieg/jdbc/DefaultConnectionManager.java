@@ -76,7 +76,9 @@ final class DefaultConnectionManager implements ConnectionManager {
   public void close(@Nullable Connection connection) throws SQLException {
 	if (null == connection) return;
 	connection.setAutoCommit(true);
-	pool.offer(connection);
+	if (!pool.offer(connection)) {
+	  throw new SQLException("Connection pool is full");
+	}
   }
 
   @Override

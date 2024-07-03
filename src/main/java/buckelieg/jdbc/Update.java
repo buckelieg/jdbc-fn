@@ -51,7 +51,7 @@ public interface Update extends Query<Update> {
    * }</pre>
    *
    * @param generatedValuesMapper generated values <code>ResultSet</code> mapper function
-   * @return a {@link List} of mapped generated results
+   * @return a {@link List} of mapped generated results or empty if this query did not produce any generated keys
    * @throws NullPointerException if generatedValuesHandler or valueMapper is null
    * @see java.sql.Connection#prepareStatement(String, int)
    */
@@ -68,7 +68,7 @@ public interface Update extends Query<Update> {
    *
    * @param generatedValuesMapper generated values <code>ResultSet</code> mapper function
    * @param colNames              column names with generated keys
-   * @return a {@link List} of mapped generated results
+   * @return a {@link List} of mapped generated results or empty if this query did not produce any generated keys
    * @throws NullPointerException     if colNames or generatedValuesHandler or valueMapper is null
    * @throws IllegalArgumentException if colNames is empty
    * @see java.sql.Connection#prepareStatement(String, String[])
@@ -86,7 +86,7 @@ public interface Update extends Query<Update> {
    *
    * @param generatedValuesMapper generated values <code>ResultSet</code> mapper function
    * @param colIndices            indices of the columns with generated keys
-   * @return a {@link List} of mapped generated results
+   * @return a {@link List} of mapped generated results or empty if this query did not produce any generated keys
    * @throws NullPointerException     if colIndices or generatedValuesHandler or valueMapper is null
    * @throws IllegalArgumentException if colIndices is empty
    * @see java.sql.Connection#prepareStatement(String, int[])

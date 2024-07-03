@@ -554,7 +554,7 @@ public class DBTestSuite {
 			AssertionFailedError.class,
 			() -> Assertions.assertTimeoutPreemptively(
 					Duration.ofSeconds(5),
-					() -> db1.transaction().run(session -> db1.transaction().run(session1 -> Thread.sleep(500))),
+					() -> db1.transaction().run(session -> db1.transaction().run(session1 -> {})),
 					"execution timed out after 5000 ms"
 			)
 	);
@@ -563,7 +563,8 @@ public class DBTestSuite {
 
   @Test
   public void testMaxConnectionsDriverManagerConnectionProvider() throws Exception {
-	DB db1 = DB.builder().withMaxConnections(3)
+	DB db1 = DB.builder()
+			.withMaxConnections(3)
 			.build(() -> DriverManager.getConnection("jdbc:derby:memory:test_dm;create=true"));
 	db1.transaction().run(s1 -> db1.transaction().run(s2 -> db1.transaction().run(s3 -> {})));
 	Assertions.assertThrows(
@@ -779,7 +780,7 @@ public class DBTestSuite {
 				  latch.countDown();
 				}
 			  };
-			  for(int i = 0; i < count; i++) {
+			  for (int i = 0; i < count; i++) {
 				service.execute(list::get);
 			  }
 			  latch.await();

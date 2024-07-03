@@ -20,11 +20,13 @@ import buckelieg.jdbc.fn.TryFunction;
 import buckelieg.jdbc.fn.TrySupplier;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import javax.annotation.ParametersAreNonnullByDefault;
 import javax.annotation.concurrent.NotThreadSafe;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -197,7 +199,9 @@ final class UpdateQuery extends AbstractQuery<Update, Statement> implements Upda
 	return longs.length;
   }
 
-  private <T> List<T> toList(ResultSet resultSet, TryFunction<ValueReader, T, SQLException> mapper) throws SQLException {
+  private <T> List<T> toList(@Nullable ResultSet resultSet, TryFunction<ValueReader, T, SQLException> mapper) throws SQLException {
+	if (null == resultSet)
+	  return Collections.emptyList(); // derby (current version - 10.14.2.0) returns null instead of empty resultSet object
 	ValueReader valueReader = ValueGetters.reader(new RSMeta(getConnection()::getMetaData, resultSet::getMetaData, new ConcurrentHashMap<>()), resultSet);
 	List<T> result = new ArrayList<>();
 	while (resultSet.next())

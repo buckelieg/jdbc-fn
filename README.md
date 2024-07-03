@@ -17,43 +17,27 @@ Add maven dependency:
 <dependency>
   <groupId>com.github.buckelieg</groupId>
   <artifactId>jdbc-fn</artifactId>
-  <version>0.3</version>
+  <version>1.0</version>
 </dependency>
 ```
 
 ### Setup database
 There are a couple of ways to set up the things:
 ```java
-// 1. Provide DataSource
-DataSource ds = // obtain ds (e.g. via JNDI or other way) 
-DB db = new DB(ds);
-// 2. Provide connection supplier
-DB db = new DB(ds::getConnection);
+DataSource ds = ... // obtain ds (e.g. via JNDI or other way)
+DB db = DB.create(ds::getConnection); // shortcut for DB.builder().build(ds::getConnection)
 // or
-DB db = new DB(() -> {/*sophisticated connection supplier function*/});
+DB db = DB.builder()
+        .withMaxConnections(10) // defaults to Runtime.getRuntime().availableProcessors()
+        .build(() -> DriverManager.getConnection("jdbc:derby:memory:test;create=true"));
 // do things...
-db.close();
-// DB can be used in try-with-resources statements
-try (DB db = new DB(/*init*/)) {
-    ...
-} finally {
-    
-}
+db.close(); // cleaning used resources: closes underlying connection pool, executor service (if configured to do so) etc...
 ```
-Note that providing connection supplier function with plain connection 
-<br/>like this: <code>DB db = new DB(() -> connection));</code> 
-<br/>or this: &nbsp;&nbsp;<code>DB db = new DB(() -> DriverManager.getConnection("vendor-specific-string"));</code> 
-<br/> e.g - if supplier function always return the same connection
-<br/>the concept of transactions will be partially broken: see [Transactions](#transactions) section.
 
 ### Select
 Use question marks:
 ```java
 Collection<String> names = db.select("SELECT name FROM TEST WHERE ID IN (?, ?)", 1, 2).execute(rs -> rs.getString("name")).collect(Collectors.toList());
-// an alias for execute method is stream - for better readability
-Collection<String> names = db.select("SELECT name FROM TEST WHERE ID IN (?, ?)", 1, 2).stream(rs -> rs.getString("name")).collect(Collectors.toList());
-// or use shorthands for stream reduction
-Collection<String> names = db.select("SELECT name FROM TEST WHERE ID IN (?, ?)", 1, 2).list(rs -> rs.getString("name"));
 ```
 or use named parameters:
 ```java
@@ -74,6 +58,41 @@ Collection<String> names = db.select("SELECT name FROM TEST WHERE 1=1 AND ID IN 
 ```
 Parameter names are CASE SENSITIVE! 'Name' and 'name' are considered different parameter names.
 <br/> Parameters may be provided with or without leading colon.
+
+###### The N+1 problem resolution
+For the cases when it is needed to process (say - enrich) each mapped row with an additional data the Select.ForBatch can be used
+
+```java
+long res = db.select("SELECT * FROM HUGE_TABLE")
+        .forBatch(/* map resultSet here to needed type*/)
+        .size(1000)
+        .execute(batchOfObjects -> {
+		  // list of mapped rows with size not more than 1000
+		  batchOfObjects.forEach(obj -> obj.setSomethingElse());
+        });
+```
+For cases where it is needed to issue any additional queries to database use:
+
+```java
+Stream<User> users = db.select("SELECT * FROM HUGE_TABLE")
+		.forBatch(/* map resultSet here to needed type*/)
+		.size(1000)
+		.execute((batch, session) -> {
+                    // list of mapped rows (to resulting type) with size not more than 1000
+                    // session maps to currently used connection
+                    Map<Long, UserAttr> attrs = session.select("SELECT * FROM USER_ATTR WHERE id IN (:ids)", batch.stream().map(User::getId).collect(Collectors.toList()))
+                        .execute(/* map to collection of domain objects that represents a user attribute */)
+                        .groupingBy(UserAttr::userId);
+                    batch.forEach(user -> user.addAttrs(attrs.getOrDefault(user.getId, Collections.emptyList())));
+		});
+// stream of users objects will consist of updated (enriched) objects
+```
+Using this to process batches you must keep some things in mind:
+<ul>
+<li>Executor service is used internally to power parallel processing</li>
+<li>All batches are processed regarding any short circuits possible</li>
+<li><code>Select.fetchSize</code> and <code>Select.ForBatch.size</code> are not the same but connected</li>
+</ul>
 
 ### Insert 
 with question marks:
@@ -104,7 +123,7 @@ long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name", entry(":
 ###### Batch mode
 For batch operation use:
 ```java
-long res = db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"} }).batch(true).execute();
+long res = db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"} }).batch(2).execute();
 ```  
 ### Delete
 ```java
@@ -128,7 +147,7 @@ db.script("CREATE TABLE TEST (id INTEGER NOT NULL, name VARCHAR(255));INSERT INT
 ```
 2) Provide a file with an SQL script
 ```java
-  db.script(new File("path/to/script.sql")).timeout(60).execute();
+db.script(new File("path/to/script.sql")).timeout(60).execute();
 ```
 Script:
 <br/>Can contain single- and multiline comments. 
@@ -140,52 +159,47 @@ Script:
 ### Transactions
 There are a couple of methods provides transaction support.
 <br/>Tell whether to create new transaction or not, provide isolation level and transaction logic function.
+
 ```java
 // suppose we have to insert a bunch of new users by name and get the latest one filled with its attributes....
-User latestUser = db.transaction(TransactionIsolation.SERIALIZABLE, db1 ->
-  // here db.equals(db1) will return true
-  // but if we claim to create new transaction it will not, because a new connection is obtained and new DB instance is created
-  // so everything inside a transaction (in this case) MUST be done through db1 reference since it will operate on newly created connection   
-  db1.update("INSERT INTO users(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"}, {"name3"} })
-    .skipWarnings(false)
-    .timeout(1, TimeUnit.MINUTES)
-    .print()
-    .execute(
-        rs -> rs.getLong(1),
-        ids -> db1.select("SELECT * FROM users WHERE id=?", ids.peek(id -> db1.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call()).max(Comparator.comparing(i -> i)).orElse(-1L))
-                 .print()
-                 .single(rs -> {
-                     User u = new User();
-                     u.setId(rs.getLong("id"));
-                     u.setName(rs.getString("name"));
-                     //... fill other user's attributes...
-                     return u;
-                 })
-    )
-    .orElse(null)
+
+Logger LOG = getLogger(); //... logger used in application 
+User latestUser = db.transaction()
+  .isolation(Transaction.Isolation.SERIALIZABLE)
+  .execute(session ->
+      session.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
+        .skipWarnings(false)
+        .timeout(1, TimeUnit.MINUTES)
+        .print(LOG::debug)
+        .execute(rs -> rs.getLong(1))
+        .stream()
+        .peek(id -> session.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call())
+        .max(Comparator.comparing(i -> i))
+        .flatMap(id -> session.select("SELECT * FROM users WHERE id=?", id).print(LOG::debug).single(rs -> {
+		  User u = new User();
+		  u.setId(rs.getLong("id"));
+		  u.setName(rs.getString("name"));
+		  // ...fill other user's attributes...
+		  return user;
+        }))
+        .orElse(null)
 );
 ```
-As the rule of thumb: always use lambda parameter to do the things inside the transaction
-###### Nested transactions
-This must be used with care.
-<br/>When calling <code>transaction()</code> method <code>createNew</code> flag (if set to <code>true</code>) implies obtaining new connection via <code>DataSource</code> or connection supplier function provided at the <code>DB</code> class [initialization](#setup-database) stage.
-<br/>If provided connection supplier function will not return a new connection - then <code>UnsupportedOperationException</code> is thrown:
+###### Nested transactions and deadlocks
+
+Providing connection supplier function with plain connection
+<br/>like this: <code>DB db = DB.create(() -> connection));</code>
+<br/>or this: &nbsp;&nbsp;<code>DB db = DB.builder().withMaxConnections(1).build(() -> DriverManager.getConnection("vendor-specific-string"));</code>
+<br/> e.g - if supplier function always return the same connection
+<br/>the concept of transactions will be partially broken.
+
+The simplest case:
 ```java
-DB db = new DB(() -> connection);
-db.transaction(TransactionIsolation.SERIALIZABLE, db1 -> db1.transaction(true, db2 -> ...))
-// throws UnsupportedOperationException
+DB db = DB.create(() -> connection); // or DB.builder().withMaxConnections(1).build(ds::getConnection)
+db.transaction().run(session1 -> db.transaction().run(session2 -> {}))
+// runs forever since each transaction tries to obtain new connection and the second one cannot be provided with new one
 ```
-Using nested transactions with various isolation levels may result in deadlocks:
-```java
-DB db = new DB(datasourceInstance);
-db.transaction(TransactionIsolation.READ_UNCOMMITED, db1 -> {
-    // do inserts, updates etc...
-    long someGeneratedId = ....
-    return db1.transaction(true, TransactionIsolation.SERIALIZABLE, db2 -> db2.select("SELECT * FROM TEST WHERE id=?", someGeneratedId).list(rs -> rs.getString("name")));
-});
-// nested transaction will be done over newly obtained connection but will not able to complete or see the generated values before enclosing transaction is committed and will eventually fail
-```
-Whenever desired transaction isolation level is not supported by RDBMS the <code>IllegalArgumentException</code> is thrown.
+
 ### Logging & Debugging
 Convenient logging methods provided.
 ```java
@@ -209,40 +223,11 @@ This will print out to standard output two lines:
 <br/>Calling <code>print()</code> on <code>Script</code> will print out the whole sql script with parameters substituted.
 <br/>Custom logging handler may also be provided for both cases.
 
-### Helper: Queries
-For cases when it is all about query execution on existing connection with no tuning, logging and other stuff the <code>Queries</code> helper class can be used:
-```java
-Connection conn = ... // somewhere previously created connection
-List<String> names = Queries.list(conn, rs -> rs.getString("name"), "SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry("ids", new long[]{1, 2, 3}));
-```
-There are plenty of pre-defined cases implemented:
-<br/><code>list</code> - for list selection 
-<br/><code>single</code> - for single object selection, 
-<br/><code>callForList</code> - calling <code>StoredProcedure</code> which returns a <code>ResultSet</code>,
-<br/><code>call</code> - call a <code>StoredProcedure</code> either with results or without,
-<br/><code>update</code> - to execute various updates,
-<br/><code>execute</code> - to execute atomic queries and/or scripts
-<br/>
-<br/>There is an option to set up the connection with helper class to reduce a number of method arguments:
-```java
-Connection conn = ... // somewhere previously created connection
-Queries.setConnection(conn);
-// all subsequent calls will be done on connection set.
-List<String> names = Queries.list(rs -> rs.getString("name"), "SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry("ids", new long[]{1, 2, 3}));
-List<String> names = Queries.callForList(rs -> rs.getString(1), "{call GETALLNAMES()}");
-```
-Note that connection must be closed explicitly after using <code>Queries</code> helper.
 ### Built-in mappers
 All <code>Select</code> query methods which takes a <code>mapper</code> function has a companion one without.
 <br/> Calling that <code>mapper</code>-less methods will imply mapping a tuple as <code>String</code> alias to <code>Object</code> value:
 ```java
-// DB
-DB db = new DB(datasourceInstance);
-List<Map<String, Object>> = db.select("SELECT name FROM TEST").list();
-// Queries
-Connection conn = ... // somewhere previously created connection
-Queries.setConnection(conn);
-List<Map<String, Object>> names = Queries.list("SELECT name FROM TEST WHERE id IN (:ids)", new SimpleImmutableEntry("ids", new long[]{1, 2, 3}));
+List<Map<String, Object>> = db.select("SELECT name FROM TEST").execute().collect(Collectors.toList());
 ```
 
 ### Prerequisites
