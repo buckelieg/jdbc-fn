@@ -28,6 +28,10 @@
         <tag>HEAD</tag>
     </scm>
 
+    <properties>
+        <derby.version>10.17.1.0</derby.version>
+    </properties>
+
     <developers>
         <developer>
             <id>buckelieg</id>
@@ -186,7 +190,13 @@
         <dependency>
             <groupId>org.apache.derby</groupId>
             <artifactId>derby</artifactId>
-            <version>10.17.1.0</version>
+            <version>${derby.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.derby</groupId>
+            <artifactId>derbytools</artifactId>
+            <version>${derby.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
