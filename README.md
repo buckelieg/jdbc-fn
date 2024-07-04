@@ -166,7 +166,7 @@ Logger LOG = getLogger(); //... logger used in application
 User latestUser = db.transaction()
   .isolation(Transaction.Isolation.SERIALIZABLE)
   .execute(session ->
-      session.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
+      session.update("INSERT INTO users(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"}, {"name3"} })
         .skipWarnings(false)
         .timeout(1, TimeUnit.MINUTES)
         .print(LOG::debug)
