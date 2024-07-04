@@ -157,8 +157,7 @@ Script:
 <br/>Support escaped syntax, so it is possible to include JDBC-like procedure call statements.
 
 ### Transactions
-There are a couple of methods provides transaction support.
-<br/>Tell whether to create new transaction or not, provide isolation level and transaction logic function.
+Long story short - an example:
 
 ```java
 // suppose we have to insert a bunch of new users by name and get the latest one filled with its attributes....
