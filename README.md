@@ -90,7 +90,7 @@ Stream<User> users = db.select("SELECT * FROM HUGE_TABLE")
 Using this to process batches you must keep some things in mind:
 <ul>
 <li>Executor service is used internally to power parallel processing</li>
-<li>All batches are processed regarding any short circuits possible</li>
+<li>All batches are processed regardless any short circuits possible</li>
 <li><code>Select.fetchSize</code> and <code>Select.ForBatch.size</code> are not the same but connected</li>
 </ul>
 
