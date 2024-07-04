@@ -63,7 +63,7 @@ Parameter names are CASE SENSITIVE! 'Name' and 'name' are considered different p
 For the cases when it is needed to process (say - enrich) each mapped row with an additional data the Select.ForBatch can be used
 
 ```java
-long res = db.select("SELECT * FROM HUGE_TABLE")
+Stream<Entity> entities = db.select("SELECT * FROM HUGE_TABLE")
         .forBatch(/* map resultSet here to needed type*/)
         .size(1000)
         .execute(batchOfObjects -> {
@@ -82,7 +82,7 @@ Stream<User> users = db.select("SELECT * FROM HUGE_TABLE")
                     // session maps to currently used connection
                     Map<Long, UserAttr> attrs = session.select("SELECT * FROM USER_ATTR WHERE id IN (:ids)", batch.stream().map(User::getId).collect(Collectors.toList()))
                         .execute(/* map to collection of domain objects that represents a user attribute */)
-                        .groupingBy(UserAttr::userId);
+                        .groupingBy(UserAttr::userId, Function::identity);
                     batch.forEach(user -> user.addAttrs(attrs.getOrDefault(user.getId, Collections.emptyList())));
 		});
 // stream of users objects will consist of updated (enriched) objects
