@@ -29,7 +29,7 @@ DB db = DB.create(ds::getConnection); // shortcut for DB.builder().build(ds::get
 // or
 DB db = DB.builder()
         .withMaxConnections(10) // defaults to Runtime.getRuntime().availableProcessors()
-        .build(() -> DriverManager.getConnection("jdbc:derby:memory:test;create=true"));
+        .build(() -> DriverManager.getConnection("vendor-specific-string"));
 // do things...
 db.close(); // cleaning used resources: closes underlying connection pool, executor service (if configured to do so) etc...
 ```
