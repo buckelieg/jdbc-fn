@@ -108,10 +108,9 @@ long res = db.update("INSERT INTO TEST(name) VALUES(:name)", entry("name","New_N
 ```
 ###### Getting generated keys
 
-To retrieve possible generated keys provide a mappring function to `execute` method:
+To retrieve possible generated keys provide a mapping function to `execute` method:
 ```java
 Collection<Long> generatedIds = db.update("INSERT INTO TEST(name) VALUES(?)", "New_Name").execute(rs -> rs.getLong(1));
-// generatedIds is a collection of Long values
 ```
 See docs for more options.
 ### Update
