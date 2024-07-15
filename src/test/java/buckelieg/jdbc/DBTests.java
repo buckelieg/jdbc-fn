@@ -53,9 +53,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 
 // TODO more test suites for other RDBMS
-public class DBTestSuite {
+public class DBTests {
 
-  private static final Logger log = LogManager.getLogger(DBTestSuite.class);
+  private static final Logger log = LogManager.getLogger(DBTests.class);
   private static Connection conn;
   private static DB db;
   private static DataSource ds;
@@ -87,7 +87,7 @@ public class DBTestSuite {
 	EmbeddedDataSource ds = new EmbeddedDataSource();
 	ds.setDatabaseName("test");
 	ds.setCreateDatabase("create");
-	DBTestSuite.ds = ds;
+	DBTests.ds = ds;
 	conn = ds.getConnection();
 	conn.createStatement().execute("CREATE TABLE TEST(id int PRIMARY KEY GENERATED ALWAYS AS IDENTITY, name VARCHAR(255) NOT NULL)");
 	conn.createStatement().execute("CREATE TABLE TEST1(id int PRIMARY KEY GENERATED ALWAYS AS IDENTITY, name VARCHAR(255) NOT NULL)");
