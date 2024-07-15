@@ -1,4 +1,4 @@
-[![build](https://github.com/buckelieg/jdbc-fn/actions/workflows/maven.yml/badge.svg)](https://github.com/buckelieg/jdbc-fn/actions/workflows/maven.yml)
+[![build](https://github.com/buckelieg/jdbc-fn/actions/workflows/ci.yml/badge.svg)](https://github.com/buckelieg/jdbc-fn/actions/workflows/ci.yml)
 [![license](https://img.shields.io/github/license/buckelieg/jdbc-fn.svg)](./LICENSE.md)
 [![dist](https://img.shields.io/maven-central/v/com.github.buckelieg/jdbc-fn.svg)](http://mvnrepository.com/artifact/com.github.buckelieg/jdbc-fn)
 [![javadoc](https://javadoc.io/badge2/com.github.buckelieg/jdbc-fn/javadoc.svg)](https://javadoc.io/doc/com.github.buckelieg/jdbc-fn)
