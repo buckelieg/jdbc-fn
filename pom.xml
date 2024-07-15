@@ -58,10 +58,9 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.12</version>
+                <version>0.7.9</version>
                 <configuration>
                     <destFile>${project.build.directory}/jacoco-report.exec</destFile>
-                    <dataFile>${project.build.directory}/jacoco-report.exec</dataFile>
                 </configuration>
                 <executions>
                     <execution>
@@ -69,14 +68,26 @@
                             <goal>prepare-agent</goal>
                         </goals>
                     </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>com.github.veithen.maven</groupId>
+                <artifactId>jacoco-report-maven-plugin</artifactId>
+                <version>0.3.0</version>
+                <configuration>
+                    <dataFile>${project.build.directory}/jacoco-report.exec</dataFile>
+                </configuration>
+                <executions>
                     <execution>
-                        <id>generate-code-coverage-report</id>
-                        <phase>prepare-package</phase>
                         <goals>
-                            <goal>report</goal>
+                            <goal>process</goal>
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.3.1</version>
             </plugin>
         </plugins>
     </build>
