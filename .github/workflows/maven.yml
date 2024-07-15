@@ -22,9 +22,8 @@ jobs:
         java-version: 1.8
     - name: Build with Maven
       run: mvn -B package --file pom.xml
-    - name: Check code coverage
-      uses: themichaelhall/check-code-coverage@v2.0.0
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v4.0.1
       with:
-        report: coverage.xml
-        required-percentage: 50
+        token: ${{ secrets.CODECOV_TOKEN }}
 
