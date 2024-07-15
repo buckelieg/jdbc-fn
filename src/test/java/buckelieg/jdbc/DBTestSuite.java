@@ -518,7 +518,7 @@ public class DBTestSuite {
 	try {
 	  db1.transaction().isolation(Transaction.Isolation.SERIALIZABLE).execute(session -> {
 		session.update("INSERT INTO test(name) VALUES(?)", "name").execute();
-		Long countAfter = session.select("SELECT COUNT(*) FROM TEST").print(s -> log.info("WTF")).single(rs -> rs.getLong(1)).orElse(null);
+		Long countAfter = session.select("SELECT COUNT(*) FROM TEST").single(rs -> rs.getLong(1)).orElse(null);
 		assertEquals(countBefore + 1, (long) countAfter);
 		throw new SQLException("Rollback!");
 	  });
@@ -838,7 +838,7 @@ public class DBTestSuite {
 	  log.info("{} batch processing called!", index);
 	  batch.forEach(map -> map.put("someKey" + index, "someValue" + index));
 	  batch.add(new HashMap<String, Object>() {{
-		put("WTF_KEY", "WTF_VALUE");
+		put("ANY_KEY", "ANY_VALUE");
 	  }});
 	  session.select(
 			  "SELECT * FROM TEST WHERE id IN (:ids)",

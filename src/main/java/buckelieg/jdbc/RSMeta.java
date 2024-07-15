@@ -108,9 +108,8 @@ final class RSMeta implements Metadata {
 	  if (null == columns) {
 		List<Column> buffer = new ArrayList<>();
 		try {
-		  for (int col = 1; col <= rsMeta.get().getColumnCount(); col++) {
+		  for (int col = 1; col <= rsMeta.get().getColumnCount(); col++)
 			buffer.add(getColumn(col));
-		  }
 		  columns = buffer;
 		} catch (SQLException e) {
 		  throw newSQLRuntimeException(e);
@@ -150,7 +149,8 @@ final class RSMeta implements Metadata {
   @Nonnull
   @Override
   public String getName(int columnIndex) {
-	if (columnIndex < 1) throw new IllegalArgumentException("Column index must start at 1");
+	if (columnIndex < 1)
+	  throw new IllegalArgumentException("Column index must start at 1");
 	List<Column> columns = getColumns();
 	if (columnIndex > columns.size())
 	  throw new IllegalArgumentException(format("No column exists under provided index %s", columnIndex));
@@ -162,9 +162,8 @@ final class RSMeta implements Metadata {
 	if (requireNonNull(columnName, "Column name must be provided").trim().isEmpty())
 	  throw new IllegalArgumentException("Column name must not be blank");
 	List<Column> columns = getColumns();
-	for (int index = 0; index < columns.size(); index++) {
+	for (int index = 0; index < columns.size(); index++)
 	  if (columnName.equalsIgnoreCase(columns.get(index).name)) return index + 1;
-	}
 	return -1;
   }
 
@@ -318,7 +317,10 @@ final class RSMeta implements Metadata {
   private boolean isNullable(String catalog, String schema, String table, String column) {
 	return getColumn(catalog, schema, table, column, c -> {
 	  if (c.nullable == null)
-		c.nullable = listResultSet(dbMeta.get().getColumns(catalog, schema, table, column), rs -> rs.getInt(NULLABLE)).stream().anyMatch(mode -> mode == DatabaseMetaData.columnNullable);
+		c.nullable = listResultSet(
+				dbMeta.get().getColumns(catalog, schema, table, column),
+				rs -> rs.getInt(NULLABLE)
+		).stream().anyMatch(mode -> mode == DatabaseMetaData.columnNullable);
 	}).nullable;
   }
 
@@ -329,7 +331,10 @@ final class RSMeta implements Metadata {
   private SQLType getSQLType(String catalog, String schema, String table, String column) {
 	return getColumn(catalog, schema, table, column, c -> {
 	  if (c.sqlType == null)
-		c.sqlType = JDBCType.valueOf(listResultSet(dbMeta.get().getColumns(catalog, schema, table, column), rs -> rs.getInt(DATA_TYPE)).stream().findFirst().orElse(Types.OTHER));
+		c.sqlType = JDBCType.valueOf(listResultSet(
+				dbMeta.get().getColumns(catalog, schema, table, column),
+				rs -> rs.getInt(DATA_TYPE)
+		).stream().findFirst().orElse(Types.OTHER));
 	}).sqlType;
   }
 
@@ -345,8 +350,7 @@ final class RSMeta implements Metadata {
 				c.index = columnIndex;
 				if (c.nullable == null) c.nullable = meta.isNullable(columnIndex) == ResultSetMetaData.columnNullable;
 				if (c.sqlType == null) c.sqlType = JDBCType.valueOf(meta.getColumnType(columnIndex));
-				if (c.javaType == null)
-				  c.javaType = Class.forName(meta.getColumnClassName(columnIndex), false, ClassLoader.getSystemClassLoader());
+				if (c.javaType == null) c.javaType = Class.forName(meta.getColumnClassName(columnIndex), false, ClassLoader.getSystemClassLoader());
 				getEnricher(enricher).accept(c);
 			  }
 	  );

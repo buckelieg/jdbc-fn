@@ -70,14 +70,12 @@ enum JDBCDefaults {
 		  Metadata meta = valueReader.meta();
 		  int columnCount = meta.count();
 		  colReaders = new ArrayList<>(columnCount);
-		  for (int col = 1; col <= columnCount; col++) {
+		  for (int col = 1; col <= columnCount; col++)
 			colReaders.add(entry(entry(meta.getLabel(col), col), reader(meta.getSQLType(col))));
-		  }
 		  instance = getter -> {
 			Map<String, Object> result = new LinkedHashMap<>(columnCount);
-			for (Map.Entry<Map.Entry<String, Integer>, TryBiFunction<ValueReader, Integer, ?, SQLException>> e : colReaders) {
+			for (Map.Entry<Map.Entry<String, Integer>, TryBiFunction<ValueReader, Integer, ?, SQLException>> e : colReaders)
 			  result.put(e.getKey().getKey(), e.getValue().apply(getter, e.getKey().getValue()));
-			}
 			return result;
 		  };
 		}

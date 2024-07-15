@@ -206,9 +206,7 @@ public class Session {
   @Nonnull
   public Select select(String query, Object... parameters) {
 	requireNonNull(query, "SQL query must be provided");
-	if (isProcedure(query)) {
-	  throw new IllegalArgumentException(format("Query '%s' is not valid select statement", query));
-	}
+	if (isProcedure(query)) throw new IllegalArgumentException(format("Query '%s' is not valid select statement", query));
 	return new SelectQuery(metaCache, connectionSupplier, connectionCloser, executorServiceSupplier, checkAnonymous(checkSingle(query)), parameters);
   }
 
@@ -287,9 +285,7 @@ public class Session {
   @Nonnull
   public Update update(String query, Object[]... batch) {
 	requireNonNull(query, "SQL query must be provided");
-	if (isProcedure(query)) {
-	  throw new IllegalArgumentException(format("Query '%s' is not valid DML statement", query));
-	}
+	if (isProcedure(query)) throw new IllegalArgumentException(format("Query '%s' is not valid DML statement", query));
 	return new UpdateQuery(connectionSupplier, connectionCloser, executorServiceSupplier, checkAnonymous(checkSingle(query)), batch);
   }
 

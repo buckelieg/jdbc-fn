@@ -78,7 +78,8 @@ enum Utils {
 	Matcher matcher = NAMED_PARAMETER.matcher(query);
 	int idx = 0;
 	while (matcher.find())
-	  for (Object o : asIterable(transformedParams.getOrDefault(matcher.group(), empty()))) indicesToValues.put(++idx, o);
+	  for (Object o : asIterable(transformedParams.getOrDefault(matcher.group(), empty())))
+		indicesToValues.put(++idx, o);
 	for (Entry<String, Optional<?>> e : transformedParams.entrySet()) {
 	  query = query.replaceAll(
 			  format("(%s\\b)%s", e.getKey(), QUOTATION_ESCAPE),
@@ -106,7 +107,8 @@ enum Utils {
   }
 
   static String checkAnonymous(String query) {
-	if (!isAnonymous(query)) throw new IllegalArgumentException(format("Named parameters mismatch for query: '%s'", query));
+	if (!isAnonymous(query))
+	  throw new IllegalArgumentException(format("Named parameters mismatch for query: '%s'", query));
 	return query;
   }
 
@@ -117,12 +119,25 @@ enum Utils {
   static SQLRuntimeException newSQLRuntimeException(Throwable... throwables) {
 	StringBuilder messages = new StringBuilder();
 	for (Throwable throwable : throwables) {
-	  Throwable t = throwable;
-	  StringBuilder message = ofNullable(t).map(Throwable::getMessage).map(msg -> new StringBuilder(format("%s ", msg.trim()))).orElse(new StringBuilder());
+	  Optional<Throwable> t = ofNullable(throwable);
+	  StringBuilder message = t
+			  .map(Throwable::getMessage)
+			  .map(String::trim)
+			  .map(StringBuilder::new)
+			  .map(msg -> msg.append(" "))
+			  .orElse(new StringBuilder());
 	  AtomicReference<String> prevMsg = new AtomicReference<>();
-	  while ((t = t.getCause()) != null) {
-		ofNullable(t.getMessage()).map(msg -> format("%s ", msg.trim())).filter(msg -> prevMsg.get() != null && prevMsg.get().equals(msg)).ifPresent(message::append);
-		prevMsg.set(t.getMessage() != null ? t.getMessage().trim() : null);
+	  while ((t = t.map(Throwable::getCause)).orElse(null) != null) {
+		t.map(Throwable::getMessage)
+				.map(msg -> format("%s ", msg.trim()))
+				.filter(msg -> prevMsg.get() != null && prevMsg.get().equals(msg))
+				.ifPresentOrElse(
+						msg -> {
+						  message.append(msg);
+						  prevMsg.set(msg);
+						},
+						() -> prevMsg.set(null)
+				);
 	  }
 	  messages.append(message);
 	}
@@ -203,10 +218,25 @@ enum Utils {
 	  }
 	}
 	if (multiLineCommentStartIndices.size() != multiLineCommentsEndIndices.size()) {
-	  throw new SQLRuntimeException(format("Multiline comments open/close tags count mismatch (%s/%s) for query:\r\n%s", multiLineCommentStartIndices.size(), multiLineCommentsEndIndices.size(), query), true);
+	  throw new SQLRuntimeException(
+			  format(
+					  "Multiline comments open/close tags count mismatch (%s/%s) for query:\r\n%s",
+					  multiLineCommentStartIndices.size(),
+					  multiLineCommentsEndIndices.size(),
+					  query
+			  ),
+			  true
+	  );
 	}
 	if (!multiLineCommentStartIndices.isEmpty() && (multiLineCommentStartIndices.get(0) > multiLineCommentsEndIndices.get(0))) {
-	  throw new SQLRuntimeException(format("Unmatched start multiline comment at %s for query:\r\n%s", multiLineCommentStartIndices.get(0), query), true);
+	  throw new SQLRuntimeException(
+			  format(
+					  "Unmatched start multiline comment at %s for query:\r\n%s",
+					  multiLineCommentStartIndices.get(0),
+					  query
+			  ),
+			  true
+	  );
 	}
 	replaced = replaceChars(replaced, singleLineCommentStartIndices, singleLineCommentEndIndices);
 	replaced = replaceChars(replaced, multiLineCommentStartIndices, multiLineCommentsEndIndices);
@@ -216,7 +246,10 @@ enum Utils {
   private static String replaceChars(String source, List<Integer> startIndices, List<Integer> endIndices) {
 	String replaced = source;
 	for (int i = 0; i < startIndices.size(); i++)
-	  replaced = replaced.replace(replaced.substring(startIndices.get(i), endIndices.get(i)), format("%" + (endIndices.get(i) - startIndices.get(i)) + "s", " "));
+	  replaced = replaced.replace(
+			  replaced.substring(startIndices.get(i), endIndices.get(i)),
+			  format("%" + (endIndices.get(i) - startIndices.get(i)) + "s", " ")
+	  );
 	return replaced;
   }
 
@@ -280,9 +313,8 @@ enum Utils {
 	return proxy(stream, getAllInterfaces(stream.getClass()), (instance, proxy, method, args) -> {
 	  if (BaseStream.class.equals(method.getDeclaringClass())) {
 		if (!BaseStream.class.isAssignableFrom(method.getReturnType())) {
-		  if ("iterator".equals(method.getName()) || "spliterator".equals(method.getName())) {
-			throw new UnsupportedOperationException("not supported");
-		  }
+		  if ("iterator".equals(method.getName()) || "spliterator".equals(method.getName()))
+			throw new UnsupportedOperationException(EXCEPTION_MESSAGE);
 		  return method.invoke(instance, args);
 		} else return proxy(method.invoke(instance, args));
 	  }
@@ -291,7 +323,7 @@ enum Utils {
 		  try (AutoCloseable proxied = (BaseStream<?, ?>) instance) {
 			return method.invoke(proxied, args);
 		  } catch (Throwable t) {
-			throw Utils.newSQLRuntimeException(t.getCause(), t);
+			throw newSQLRuntimeException(t.getCause(), t);
 		  }
 		} else return proxy(method.invoke(instance, args));
 	  }

@@ -123,7 +123,8 @@ abstract class AbstractQuery<Q extends Query<Q>, S extends Statement> implements
   @Nonnull
   @Override
   public Q print(Consumer<String> printer) {
-	if (null == printer) throw new NullPointerException("Printer must be provided");
+	if (null == printer)
+	  throw new NullPointerException("Printer must be provided");
 	printer.accept(asSQL());
 	return (Q) this;
   }

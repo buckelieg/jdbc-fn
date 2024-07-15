@@ -80,7 +80,9 @@ final class ValueSetters implements ValueWriter {
 		  TryTriConsumer<R, Integer, T, SQLException> rowSetSetter
   ) throws SQLException {
 	if (null != preparedStatement) statementSetter.accept((S) preparedStatement, index, value);
-	else if (null != callableStatement) ((TryTriConsumer<CallableStatement, Integer, T, SQLException>) statementSetter).accept(callableStatement, index, value);
+	else if (null != callableStatement)
+	  ((TryTriConsumer<CallableStatement, Integer, T, SQLException>) statementSetter)
+			  .accept(callableStatement, index, value);
 	else if (null != resultSet) resultSetSetter.accept(resultSet, index, value);
 	else if (null != rowSet) rowSetSetter.accept((R) rowSet, index, value);
   }
@@ -110,7 +112,9 @@ final class ValueSetters implements ValueWriter {
 		  TryQuadConsumer<RowSet, Integer, T, N, SQLException> rowSetSetter
   ) throws SQLException {
 	if (null != preparedStatement) statementSetter.accept((S) preparedStatement, index, value1, value2);
-	else if (null != callableStatement) ((TryQuadConsumer<CallableStatement, Integer, T, N, SQLException>) statementSetter).accept(callableStatement, index, value1, value2);
+	else if (null != callableStatement)
+	  ((TryQuadConsumer<CallableStatement, Integer, T, N, SQLException>) statementSetter)
+			  .accept(callableStatement, index, value1, value2);
 	else if (null != resultSet) resultSetSetter.accept(resultSet, index, value1, value2);
 	else if (null != rowSet) rowSetSetter.accept(rowSet, index, value1, value2);
   }

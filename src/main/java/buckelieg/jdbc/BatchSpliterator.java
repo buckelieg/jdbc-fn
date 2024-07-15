@@ -104,9 +104,8 @@ final class BatchSpliterator<T> implements Spliterator<T> {
   public boolean tryAdvance(Consumer<? super T> action) {
 	if (!init()) return false;
 	if (batchCount.get() > 0) {
-	  for (T item : next()) {
+	  for (T item : next())
 		action.accept(item);
-	  }
 	  return true;
 	} else return false;
   }
@@ -130,8 +129,10 @@ final class BatchSpliterator<T> implements Spliterator<T> {
 	  do {
 		next(); // TODO are there any chances to short circuit these out?
 	  } while (!submittedTasks.stream().allMatch(Future::isDone));
+	  selectQuery.finisher.run();
 	  selectQuery.close();
-	  if (null != exception.get()) throw newSQLRuntimeException(exception.get());
+	  if (null != exception.get())
+		throw newSQLRuntimeException(exception.get());
 	}
   }
 

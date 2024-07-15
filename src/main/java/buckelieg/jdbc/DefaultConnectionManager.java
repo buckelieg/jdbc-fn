@@ -55,15 +55,13 @@ final class DefaultConnectionManager implements ConnectionManager {
 	if (isShuttingDown.get()) throw new SQLException("Connection pool is shutting down");
 	Connection connection;
 	try {
-	  if (size.getAndIncrement() < maxConnections) {
+	  if (size.get() < maxConnections) {
+		size.incrementAndGet();
 		connection = connectionSupplier.get();
 		if (null == connection) throw new NullPointerException("Provided connection is null");
-		if (obtainedConnections.contains(connection)) {
-		  connection = pool.take();
-		} else obtainedConnections.add(connection);
-	  } else {
-		connection = pool.take();
-	  }
+		if (obtainedConnections.contains(connection)) connection = pool.take();
+		else obtainedConnections.add(connection);
+	  } else connection = pool.take();
 	} catch (InterruptedException e) {
 	  Thread.currentThread().interrupt();
 	  throw new SQLException(e);
@@ -76,9 +74,7 @@ final class DefaultConnectionManager implements ConnectionManager {
   public void close(@Nullable Connection connection) throws SQLException {
 	if (null == connection) return;
 	connection.setAutoCommit(true);
-	if (!pool.offer(connection)) {
-	  throw new SQLException("Connection pool is full");
-	}
+	if (!pool.offer(connection)) throw new SQLException("Connection pool is full");
   }
 
   @Override
@@ -95,8 +91,6 @@ final class DefaultConnectionManager implements ConnectionManager {
 	  }
 	}
 	obtainedConnections.clear();
-	if (null != exception) {
-	  throw exception;
-	}
+	if (null != exception) throw exception;
   }
 }
