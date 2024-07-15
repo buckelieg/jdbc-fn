@@ -15,7 +15,6 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryFunction;
 import buckelieg.jdbc.fn.TrySupplier;
 
 import javax.annotation.Nonnull;
@@ -88,7 +87,7 @@ public final class DB extends Session {
    *        .skipWarnings(false)
    *        .timeout(1, TimeUnit.MINUTES)
    *        .print() // prints to System.out
-   *        .execute(rs -> rs.getLong(1)) // returns a java.util.List of generated ids
+   *        .execute(rs -> rs.getLong(1)) // returns a collection of generated ids
    *        .stream()
    *        .peek(id -> session.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call())
    *        .max(Comparator.comparing(i -> i))
@@ -103,12 +102,7 @@ public final class DB extends Session {
    * );
    * }</pre>
    *
-   * @return an arbitrary result
-   * @throws NullPointerException          if no action or isolation level is provided
-   * @throws UnsupportedOperationException if <code>createNew</code> is <code>true</code> but provided <code>connectionSupplier</code> cannot create new connection
-   * @throws IllegalArgumentException      if desired transaction isolation level is not supported
-   * @see Transaction.Isolation
-   * @see TryFunction
+   * @return a transaction instance
    */
   @Nonnull
   public Transaction transaction() {

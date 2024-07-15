@@ -51,10 +51,10 @@ import static java.util.stream.Stream.of;
 @ParametersAreNonnullByDefault
 public class Session {
 
-  protected final TrySupplier<Connection, SQLException> connectionSupplier;
+  final TrySupplier<Connection, SQLException> connectionSupplier;
   final Map<String, RSMeta.Column> metaCache;
-  protected final TryConsumer<Connection, ? extends Throwable> connectionCloser;
-  protected final Supplier<ExecutorService> executorServiceSupplier;
+  final TryConsumer<Connection, ? extends Throwable> connectionCloser;
+  final Supplier<ExecutorService> executorServiceSupplier;
 
   Session(
 		  Map<String, RSMeta.Column> metaCache,

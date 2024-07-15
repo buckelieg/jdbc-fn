@@ -231,7 +231,7 @@ This will print out to standard output two lines:
 
 ### Built-in mappers
 All <code>Select</code> query methods which takes a <code>mapper</code> function has a companion one without.
-<br/> Calling that <code>mapper</code>-less methods will imply mapping a tuple as <code>String</code> alias to <code>Object</code> value:
+<br/> Calling that <code>mapper</code>-less methods will imply mapping to a tuple as <code>String</code> alias to <code>Object</code> value:
 ```java
 List<Map<String, Object>> = db.select("SELECT name FROM TEST").execute().collect(Collectors.toList());
 ```
