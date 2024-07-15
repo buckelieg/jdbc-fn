@@ -28,8 +28,8 @@ DataSource ds = ... // obtain ds (e.g. via JNDI or other way)
 DB db = DB.create(ds::getConnection); // shortcut for DB.builder().build(ds::getConnection)
 // or
 DB db = DB.builder()
-        .withMaxConnections(10) // defaults to Runtime.getRuntime().availableProcessors()
-        .build(() -> DriverManager.getConnection("jdbc:derby:memory:test;create=true"));
+          .withMaxConnections(10) // defaults to Runtime.getRuntime().availableProcessors()
+          .build(() -> DriverManager.getConnection("vendor-specific-string"));
 // do things...
 db.close(); // cleaning used resources: closes underlying connection pool, executor service (if configured to do so) etc...
 ```
@@ -60,7 +60,7 @@ Parameter names are CASE SENSITIVE! 'Name' and 'name' are considered different p
 <br/> Parameters may be provided with or without leading colon.
 
 ###### The N+1 problem resolution
-For the cases when it is needed to process (say - enrich) each mapped row with an additional data the Select.ForBatch can be used
+For the cases when it is needed to process (say - enrich) each mapped row with an additional data the `Select.ForBatch` can be used
 
 ```java
 Stream<Entity> entities = db.select("SELECT * FROM HUGE_TABLE")
@@ -97,7 +97,7 @@ Using this to process batches you must keep some things in mind:
 ### Insert 
 with question marks:
 ```java
-long res = db.update("INSERT INTO TEST(name) VALUES(?)", "New_Name").execute();
+long res = db.update("INSERT INTO TEST(name) VALUES(?)", "New_Name").execute(); // res is an affected rows count
 ```
 Or with named parameters:
 ```java
@@ -106,6 +106,13 @@ long res = db.update("INSERT INTO TEST(name) VALUES(:name)", new SimpleImmutable
 import static java.util.Map.entry;
 long res = db.update("INSERT INTO TEST(name) VALUES(:name)", entry("name","New_Name")).execute();
 ```
+###### Getting generated keys
+
+To retrieve possible generated keys provide a mapping function to `execute` method:
+```java
+Collection<Long> generatedIds = db.update("INSERT INTO TEST(name) VALUES(?)", "New_Name").execute(rs -> rs.getLong(1));
+```
+See docs for more options.
 ### Update
 ```java
 long res = db.update("UPDATE TEST SET NAME=? WHERE NAME=?", "new_name_2", "name_2").execute();
