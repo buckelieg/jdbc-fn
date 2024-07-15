@@ -20,11 +20,12 @@ jobs:
       uses: actions/setup-java@v1
       with:
         java-version: 1.8
-    - name: Build with Maven
-      run: mvn -B package --file pom.xml
+    - name: Install dependencies
+      run: mvn install -DskipTests=true -Dmaven.javadoc.skip=true -B -V
+    - name: Run tests and collect coverage
+      run: mvn -B test
     - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v4.0.1
+      uses: codecov/codecov-action@v4.2.0
       with:
-        files: ./target/coverage.json
         token: ${{ secrets.CODECOV_TOKEN }}
 
