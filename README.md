@@ -2,6 +2,7 @@
 [![license](https://img.shields.io/github/license/buckelieg/jdbc-fn.svg)](./LICENSE.md)
 [![dist](https://img.shields.io/maven-central/v/com.github.buckelieg/jdbc-fn.svg)](http://mvnrepository.com/artifact/com.github.buckelieg/jdbc-fn)
 [![javadoc](https://javadoc.io/badge2/com.github.buckelieg/jdbc-fn/javadoc.svg)](https://javadoc.io/doc/com.github.buckelieg/jdbc-fn)
+[![codecov](https://codecov.io/github/buckelieg/jdbc-fn/graph/badge.svg?token=4uHlR7gi8v)](https://codecov.io/github/buckelieg/jdbc-fn)
 # jdbc-fn
 Functional style programming over plain JDBC.
 + Execute SQL [SELECT](#select) query and process results with Java Stream API.
