@@ -131,13 +131,8 @@ enum Utils {
 		t.map(Throwable::getMessage)
 				.map(msg -> format("%s ", msg.trim()))
 				.filter(msg -> prevMsg.get() != null && prevMsg.get().equals(msg))
-				.ifPresentOrElse(
-						msg -> {
-						  message.append(msg);
-						  prevMsg.set(msg);
-						},
-						() -> prevMsg.set(null)
-				);
+				.ifPresent(message::append);
+		prevMsg.set(t.map(Throwable::getMessage).map(String::trim).orElse(null));
 	  }
 	  messages.append(message);
 	}
