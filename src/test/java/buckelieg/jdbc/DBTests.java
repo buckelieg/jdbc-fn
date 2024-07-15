@@ -66,22 +66,25 @@ public class DBTests {
 
   @BeforeAll
   public static void init() throws Exception {
-	Files.walkFileTree(Paths.get("test"), new SimpleFileVisitor<Path>() {
-	  @Override
-	  public FileVisitResult visitFile(Path path, BasicFileAttributes attrs) throws IOException {
-		Files.delete(path);
-		return FileVisitResult.CONTINUE;
-	  }
-
-	  @Override
-	  public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
-		if (exc != null) {
-		  throw exc;
+	Path test = Paths.get("test");
+	if (test.toFile().exists()) {
+	  Files.walkFileTree(test, new SimpleFileVisitor<Path>() {
+		@Override
+		public FileVisitResult visitFile(Path path, BasicFileAttributes attrs) throws IOException {
+		  Files.delete(path);
+		  return FileVisitResult.CONTINUE;
 		}
-		Files.delete(dir);
-		return FileVisitResult.CONTINUE;
-	  }
-	});
+
+		@Override
+		public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+		  if (exc != null) {
+			throw exc;
+		  }
+		  Files.delete(dir);
+		  return FileVisitResult.CONTINUE;
+		}
+	  });
+	}
 	Class.forName("org.apache.derby.jdbc.EmbeddedDriver");
 	conn = DriverManager.getConnection("jdbc:derby:memory:test;create=true");
 	EmbeddedDataSource ds = new EmbeddedDataSource();
