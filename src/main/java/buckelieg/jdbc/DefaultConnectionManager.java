@@ -21,10 +21,10 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -46,7 +46,7 @@ final class DefaultConnectionManager implements ConnectionManager {
 	this.connectionSupplier = connectionSupplier;
 	this.maxConnections = maxConnections;
 	this.pool = new ArrayBlockingQueue<>(maxConnections);
-	this.obtainedConnections = new ArrayList<>(maxConnections);
+	this.obtainedConnections = new CopyOnWriteArrayList<>();
   }
 
   @Nonnull

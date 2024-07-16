@@ -134,7 +134,7 @@ public interface TryPredicate<I, E extends Throwable> {
    * @throws E an arbitrary exception
    */
   static <I, E extends Throwable> TryPredicate<I, E> isEqual(Object targetRef) throws E {
-	return ref -> Objects.equals(ref, targetRef);
+	return (null == targetRef) ? Objects::isNull : ref -> Objects.equals(ref, targetRef);
   }
 
   /**

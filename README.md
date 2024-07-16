@@ -81,7 +81,7 @@ Stream<User> users = db.select("SELECT * FROM HUGE_TABLE")
 		.execute((batch, session) -> {
                     // list of mapped rows (to resulting type) with size not more than 1000
                     // session maps to currently used connection
-                    Map<Long, UserAttr> attrs = session.select("SELECT * FROM USER_ATTR WHERE id IN (:ids)", batch.stream().map(User::getId).collect(Collectors.toList()))
+                    Map<Long, UserAttr> attrs = session.select("SELECT * FROM USER_ATTR WHERE id IN (:ids)", entry("ids", batch.stream().map(User::getId).collect(Collectors.toList())))
                         .execute(/* map to collection of domain objects that represents a user attribute */)
                         .groupingBy(UserAttr::userId, Function::identity);
                     batch.forEach(user -> user.addAttrs(attrs.getOrDefault(user.getId, Collections.emptyList())));
