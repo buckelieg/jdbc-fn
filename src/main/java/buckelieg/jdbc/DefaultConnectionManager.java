@@ -21,12 +21,14 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 final class DefaultConnectionManager implements ConnectionManager {
 
@@ -42,11 +44,16 @@ final class DefaultConnectionManager implements ConnectionManager {
 
   private final AtomicBoolean isShuttingDown = new AtomicBoolean(false);
 
-  DefaultConnectionManager(TrySupplier<Connection, SQLException> connectionSupplier, int maxConnections) {
+  private final AtomicLong activeConnections = new AtomicLong(0);
+
+  private final Duration waitOnClose;
+
+  DefaultConnectionManager(TrySupplier<Connection, SQLException> connectionSupplier, int maxConnections, Duration waitOnClose) {
 	this.connectionSupplier = connectionSupplier;
 	this.maxConnections = maxConnections;
 	this.pool = new ArrayBlockingQueue<>(maxConnections);
 	this.obtainedConnections = new CopyOnWriteArrayList<>();
+	this.waitOnClose = waitOnClose;
   }
 
   @Nonnull
@@ -67,6 +74,7 @@ final class DefaultConnectionManager implements ConnectionManager {
 	  throw new SQLException(e);
 	}
 	connection.setAutoCommit(false);
+	activeConnections.incrementAndGet();
 	return connection;
   }
 
@@ -74,12 +82,21 @@ final class DefaultConnectionManager implements ConnectionManager {
   public void close(@Nullable Connection connection) throws SQLException {
 	if (null == connection) return;
 	connection.setAutoCommit(true);
+	activeConnections.decrementAndGet();
 	if (!pool.offer(connection)) throw new SQLException("Connection pool is full");
   }
 
   @Override
   public void close() throws SQLException {
 	isShuttingDown.set(true);
+	if(activeConnections.get() > 0) {
+	  // gracefully closing pool waiting for configured time for existing transactions to complete
+	  try {
+		Thread.sleep(waitOnClose.toMillis());
+	  } catch (InterruptedException e) {
+		Thread.currentThread().interrupt();
+	  }
+	}
 	pool.clear();
 	SQLException exception = null;
 	for (Connection connection : obtainedConnections) {
@@ -93,4 +110,5 @@ final class DefaultConnectionManager implements ConnectionManager {
 	obtainedConnections.clear();
 	if (null != exception) throw exception;
   }
+
 }

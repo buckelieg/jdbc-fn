@@ -44,7 +44,10 @@ or use named parameters:
 ```java
 // in java9+
 import static java.util.Map.of;
-Collection<String> names = db.select("SELECT name FROM TEST WHERE 1=1 AND ID IN (:ID) OR NAME=:name", of(":ID", new Object[]{1, 2}, ":name", "name_5")).execute(rs -> rs.getString("name"))
+Collection<String> names = db.select(
+		"SELECT name FROM TEST WHERE 1=1 AND ID IN (:ID) OR NAME=:name", 
+                of(":ID", new Object[]{1, 2}, ":name", "name_5")
+        ).execute(rs -> rs.getString("name"))
         .reduce(
                 new LinkedList<>(),
                 (list, name) -> {
@@ -60,9 +63,8 @@ Collection<String> names = db.select("SELECT name FROM TEST WHERE 1=1 AND ID IN 
 Parameter names are CASE SENSITIVE! 'Name' and 'name' are considered different parameter names.
 <br/> Parameters may be provided with or without leading colon.
 
-###### The N+1 problem resolution
+##### The N+1 problem resolution
 For the cases when it is needed to process (say - enrich) each mapped row with an additional data the `Select.ForBatch` can be used
-
 ```java
 Stream<Entity> entities = db.select("SELECT * FROM HUGE_TABLE")
         .forBatch(/* map resultSet here to needed type*/)
@@ -73,19 +75,18 @@ Stream<Entity> entities = db.select("SELECT * FROM HUGE_TABLE")
         });
 ```
 For cases where it is needed to issue any additional queries to database use:
-
 ```java
-Stream<User> users = db.select("SELECT * FROM HUGE_TABLE")
-		.forBatch(/* map resultSet here to needed type*/)
-		.size(1000)
-		.execute((batch, session) -> {
-                    // list of mapped rows (to resulting type) with size not more than 1000
-                    // session maps to currently used connection
-                    Map<Long, UserAttr> attrs = session.select("SELECT * FROM USER_ATTR WHERE id IN (:ids)", entry("ids", batch.stream().map(User::getId).collect(Collectors.toList())))
-                        .execute(/* map to collection of domain objects that represents a user attribute */)
-                        .groupingBy(UserAttr::userId, Function::identity);
-                    batch.forEach(user -> user.addAttrs(attrs.getOrDefault(user.getId, Collections.emptyList())));
-		});
+// suppose the USERS table contains thousands of records
+Stream<User> users = db.select("SELECT * FROM USERS")
+    .forBatch(rs -> new User(rs.getLong("id"), rs.getString("name")))
+    .size(1000)
+    .execute((batchOfUsers, session) -> {
+	  Map<Long, UserAttr> attrs = session.select(
+		"SELECT * FROM USER_ATTR WHERE id IN (:ids)",
+                entry("ids", batchOfUsers.stream().map(User::getId).collect(Collectors.toList()))
+          ).execute().groupingBy(UserAttr::userId, Function::identity);
+	  batchOfUsers.forEach(user -> user.addAttrs(attrs.getOrDefault(user.getId, Collections.emptyList())));
+	});
 // stream of users objects will consist of updated (enriched) objects
 ```
 Using this to process batches you must keep some things in mind:
@@ -95,10 +96,24 @@ Using this to process batches you must keep some things in mind:
 <li><code>Select.fetchSize</code> and <code>Select.ForBatch.size</code> are not the same but connected</li>
 </ul>
 
+##### Metadata processing
+For the special cases when only a metadata of the query is needed `Select.forMeta` can be used:
+```java
+// suppose we want to collect information of which column of the provided query is a primary key
+import java.util.HashMap;
+
+Map<String, Boolean> processedMeta = db.select("SELECT * FROM TEST").forMeta(metadata -> {
+  Map<String, Boolean> map = new HashMap<>();
+  metadata.forEachColumn(columnIndex -> map.put(metadata.getName(columnIndex), metadata.isPrimaryKey(columnIndex)));
+  return map;
+});
+```
+
 ### Insert 
 with question marks:
 ```java
-long res = db.update("INSERT INTO TEST(name) VALUES(?)", "New_Name").execute(); // res is an affected rows count
+// res is an affected rows count
+long res = db.update("INSERT INTO TEST(name) VALUES(?)", "New_Name").execute();
 ```
 Or with named parameters:
 ```java
@@ -107,8 +122,7 @@ long res = db.update("INSERT INTO TEST(name) VALUES(:name)", new SimpleImmutable
 import static java.util.Map.entry;
 long res = db.update("INSERT INTO TEST(name) VALUES(:name)", entry("name","New_Name")).execute();
 ```
-###### Getting generated keys
-
+##### Getting generated keys
 To retrieve possible generated keys provide a mapping function to `execute` method:
 ```java
 Collection<Long> generatedIds = db.update("INSERT INTO TEST(name) VALUES(?)", "New_Name").execute(rs -> rs.getLong(1));
@@ -128,7 +142,7 @@ long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name",
 import static java.util.Map.entry;
 long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name", entry(":name", "new_name_2"), entry(":new_name", "name_2")).execute();
 ```
-###### Batch mode
+##### Batch mode
 For batch operation use:
 ```java
 long res = db.update("INSERT INTO TEST(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"} }).batch(2).execute();
@@ -192,8 +206,7 @@ User latestUser = db.transaction()
         .orElse(null)
 );
 ```
-###### Nested transactions and deadlocks
-
+##### Nested transactions and deadlocks
 Providing connection supplier function with plain connection
 <br/>like this: <code>DB db = DB.create(() -> connection));</code>
 <br/>or this: &nbsp;&nbsp;<code>DB db = DB.builder().withMaxConnections(1).build(() -> DriverManager.getConnection("vendor-specific-string"));</code>
@@ -218,7 +231,7 @@ The above will print a current query to provided logger with debug method.
 <br/><code>SELECT * FROM TEST WHERE id=7</code>
 <br/>Calling <code>print()</code> without arguments will do the same with standard output.
 
-###### Scripts logging
+##### Scripts logging
 For <code>Script</code> query <code>verbose()</code> method can be used to track current script step execution.
 ```java
 db.script("SELECT * FROM TEST WHERE id=:id;DROP TABLE TEST", new SimpleImmutableEntry<>("id", 5)).verbose().execute();

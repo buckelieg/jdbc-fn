@@ -52,8 +52,10 @@ enum JDBCDefaults {
 
   static Map<String, Object> defaultMapper(ValueReader reader) throws SQLException {
 	Metadata meta = reader.meta();
-	Map<String, Object> result = new HashMap<>(meta.count());
-	reader.meta().forEachColumn(index -> result.put(meta.getName(index), reader(meta.getSQLType(index)).apply(reader, index)));
+	Map<String, Object> result = new HashMap<>(meta.columnCount());
+	for(int index = 1; index <= meta.columnCount(); index++) {
+	  result.put(meta.getName(index), reader(meta.getSQLType(index)).apply(reader, index));
+	}
 	return result;
   }
 
@@ -68,7 +70,7 @@ enum JDBCDefaults {
 	  return mapper.updateAndGet(instance -> {
 		if (null == instance) {
 		  Metadata meta = valueReader.meta();
-		  int columnCount = meta.count();
+		  int columnCount = meta.columnCount();
 		  colReaders = new ArrayList<>(columnCount);
 		  for (int col = 1; col <= columnCount; col++)
 			colReaders.add(entry(entry(meta.getLabel(col), col), reader(meta.getSQLType(col))));
@@ -183,7 +185,7 @@ enum JDBCDefaults {
   }
 
   private static void setObject(ValueWriter writer, int index, Object value) throws SQLException {
-	if (value == null) writer.setObject(index, null);
+	if (null == value) writer.setObject(index, null);
 	else {
 	  Class<?> cls = value.getClass();
 	  if (Clob.class.isAssignableFrom(cls)) writer.setClob(index, (Clob) value);
@@ -195,6 +197,20 @@ enum JDBCDefaults {
 	  else if (Calendar.class.isAssignableFrom(cls)) writer.setTimestamp(index, new Timestamp(((Calendar) value).getTimeInMillis()));
 	  else if (Instant.class.isAssignableFrom(cls)) writer.setTimestamp(index, new Timestamp(((Instant) value).toEpochMilli()), Calendar.getInstance());
 	  else if (ZonedDateTime.class.isAssignableFrom(cls)) writer.setTimestamp(index, new Timestamp(((ZonedDateTime) value).toInstant().toEpochMilli()), Calendar.getInstance());
+	  else if (byte.class.isAssignableFrom(cls)) writer.setShort(index, (byte) value);
+	  else if (Byte.class.isAssignableFrom(cls)) writer.setShort(index, (Byte) value);
+	  else if (short.class.isAssignableFrom(cls)) writer.setShort(index, (short) value);
+	  else if (Short.class.isAssignableFrom(cls)) writer.setShort(index, (Short) value);
+	  else if (int.class.isAssignableFrom(cls)) writer.setInt(index, (int) value);
+	  else if (Integer.class.isAssignableFrom(cls)) writer.setInt(index, (Integer) value);
+	  else if (long.class.isAssignableFrom(cls)) writer.setLong(index, (long) value);
+	  else if (Long.class.isAssignableFrom(cls)) writer.setLong(index, (Long) value);
+	  else if (float.class.isAssignableFrom(cls)) writer.setFloat(index, (float) value);
+	  else if (Float.class.isAssignableFrom(cls)) writer.setFloat(index, (Float) value);
+	  else if (double.class.isAssignableFrom(cls)) writer.setDouble(index, (double) value);
+	  else if (Double.class.isAssignableFrom(cls)) writer.setDouble(index, (Double) value);
+	  else if (boolean.class.isAssignableFrom(cls)) writer.setBoolean(index, (boolean) value);
+	  else if (BigDecimal.class.isAssignableFrom(cls)) writer.setBigDecimal(index, (BigDecimal) value);
 	  else writer.setObject(index, value);
 	}
   }

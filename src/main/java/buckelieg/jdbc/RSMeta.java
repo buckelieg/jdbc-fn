@@ -265,9 +265,7 @@ final class RSMeta implements Metadata {
   public void forEachColumn(TryConsumer<Integer, SQLException> action) {
 	if (null == action) throw new NullPointerException("Action must be provided");
 	try {
-	  for (Column column : getColumns()) {
-		action.accept(column.index);
-	  }
+	  for (Column column : getColumns()) action.accept(column.index);
 	} catch (SQLException e) {
 	  throw newSQLRuntimeException(e);
 	}
@@ -276,7 +274,10 @@ final class RSMeta implements Metadata {
   private boolean isPrimaryKey(Table table, String column) {
 	return getColumn(table.catalog, table.schema, table.name, column, c -> {
 	  if (c.pk == null)
-		c.pk = listResultSet(dbMeta.get().getPrimaryKeys(table.catalog, table.schema, table.name), rs -> rs.getString(COLUMN_NAME)).stream().anyMatch(name -> name.equalsIgnoreCase(column));
+		c.pk = listResultSet(
+				dbMeta.get().getPrimaryKeys(table.catalog, table.schema, table.name),
+				rs -> rs.getString(COLUMN_NAME)
+		).stream().anyMatch(name -> name.equalsIgnoreCase(column));
 	}).pk;
   }
 
@@ -413,7 +414,7 @@ final class RSMeta implements Metadata {
 
   private Consumer<Column> getEnricher(@Nullable TryConsumer<Column, Exception> enricher) {
 	return c -> {
-	  if (enricher != null) {
+	  if (null != enricher) {
 		try {
 		  enricher.accept(c);
 		} catch (Exception e) {

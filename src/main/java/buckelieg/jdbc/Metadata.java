@@ -81,7 +81,7 @@ public interface Metadata {
    *
    * @return a column count
    */
-  default int count() {
+  default int columnCount() {
 	return names().size();
   }
 

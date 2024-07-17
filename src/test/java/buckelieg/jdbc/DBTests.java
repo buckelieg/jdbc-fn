@@ -853,6 +853,14 @@ public class DBTests {
   @Test
   public void testSelectForMeta() {
 	assertEquals(2, db.select("SELECT * FROM TEST").forMeta(Metadata::getColumnFullNames).size());
+	Map<String, Boolean> meta = db.select("SELECT * FROM TEST").forMeta(metadata -> {
+	  Map<String, Boolean> map = new HashMap<>();
+	  metadata.forEachColumn(columnIndex -> map.put(metadata.getName(columnIndex), metadata.isPrimaryKey(columnIndex)));
+	  return map;
+	});
+	assertEquals(2, meta.size());
+	assertTrue(meta.get("ID"));
+	assertFalse(meta.get("NAME"));
   }
 
 }

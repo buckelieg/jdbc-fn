@@ -22,6 +22,7 @@ import javax.annotation.ParametersAreNonnullByDefault;
 import javax.annotation.concurrent.ThreadSafe;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -54,17 +55,21 @@ public final class DB extends Session {
 
   private final boolean terminateConveyorOnClose;
 
+  private final boolean terminateConnectionPoolOnClose;
+
   private DB(
 		  Map<String, RSMeta.Column> metaCache,
 		  Supplier<String> txIdProvider,
 		  ConnectionManager connectionManager,
 		  Supplier<ExecutorService> executorServiceSupplier,
-		  boolean terminateConveyorOnClose) {
+		  boolean terminateConveyorOnClose,
+		  boolean terminateConnectionPoolOnClose) {
 	super(metaCache, connectionManager::getConnection, connectionManager::close, executorServiceSupplier);
 	this.txIdProvider = txIdProvider;
 	this.connectionManager = connectionManager;
 	this.executorServiceProvider = () -> getExecutorService(executorServiceSupplier);
 	this.terminateConveyorOnClose = terminateConveyorOnClose;
+	this.terminateConnectionPoolOnClose = terminateConnectionPoolOnClose;
   }
 
   private ExecutorService getExecutorService(Supplier<ExecutorService> executorServiceSupplier) {
@@ -122,10 +127,12 @@ public final class DB extends Session {
 	if (null != conveyor && terminateConveyorOnClose) {
 	  Optional.ofNullable(conveyor.get()).ifPresent(ExecutorService::shutdownNow);
 	}
-	try {
-	  connectionManager.close();
-	} catch (SQLException e) {
-	  throw Utils.newSQLRuntimeException(e);
+	if (terminateConnectionPoolOnClose) {
+	  try {
+		connectionManager.close();
+	  } catch (SQLException e) {
+		throw Utils.newSQLRuntimeException(e);
+	  }
 	}
   }
 
@@ -142,6 +149,8 @@ public final class DB extends Session {
 	private int maxConnections = Runtime.getRuntime().availableProcessors();
 
 	private boolean terminateExecutorServiceOnClose = false;
+
+	private boolean terminateConnectionPoolOnClose = true;
 
 	private ConnectionManager connectionManager;
 
@@ -186,6 +195,19 @@ public final class DB extends Session {
 	@Nonnull
 	public Builder withTerminateExecutorServiceOnClose(boolean terminateExecutorServiceOnClose) {
 	  this.terminateExecutorServiceOnClose = terminateExecutorServiceOnClose;
+	  return this;
+	}
+
+	/**
+	 * Configures a {@linkplain DB} instance with connection pool termination on close value provided<br/>
+	 * Default is {@code true}
+	 *
+	 * @param terminateConnectionPoolOnClose if {@code true} - then underlying connection pool will be attempted to shut down on {@linkplain DB#close()} method invocation
+	 * @return a {@linkplain Builder} instance
+	 */
+	@Nonnull
+	public Builder withTerminateConnectionPoolOnClose(boolean terminateConnectionPoolOnClose) {
+	  this.terminateConnectionPoolOnClose = terminateConnectionPoolOnClose;
 	  return this;
 	}
 
@@ -235,9 +257,10 @@ public final class DB extends Session {
 	  return new DB(
 			  new ConcurrentHashMap<>(),
 			  txIdProvider,
-			  null == connectionManager ? new DefaultConnectionManager(connectionProvider, maxConnections) : connectionManager,
+			  null == connectionManager ? new DefaultConnectionManager(connectionProvider, maxConnections, Duration.ofSeconds(5)) : connectionManager,
 			  executorServiceSupplier,
-			  terminateExecutorServiceOnClose
+			  terminateExecutorServiceOnClose,
+			  terminateConnectionPoolOnClose
 	  );
 	}
   }
