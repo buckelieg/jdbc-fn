@@ -91,8 +91,8 @@ Stream<User> users = db.select("SELECT * FROM USERS")
 			// etc...
 			return attr;
 		  })
-              .groupingBy(UserAttr::userId, Function::identity);
-	  batchOfUsers.forEach(user -> user.addAttrs(attrs.getOrDefault(user.getId, Collections.emptyList())));
+          .groupingBy(UserAttr::userId, Function.identity());
+	  batchOfUsers.forEach(user -> user.addAttrs(attrs.getOrDefault(user.getId(), Collections.emptyList())));
 	});
 // stream of users objects will consist of updated (enriched) objects
 ```
