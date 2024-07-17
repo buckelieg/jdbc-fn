@@ -47,8 +47,7 @@ import static java.util.Map.of;
 Collection<String> names = db.select(
 		"SELECT name FROM TEST WHERE 1=1 AND ID IN (:ID) OR NAME=:name", 
                 of(":ID", new Object[]{1, 2}, ":name", "name_5")
-        ).execute(rs -> rs.getString("name"))
-        .reduce(
+        ).execute(rs -> rs.getString("name")).reduce(
                 new LinkedList<>(),
                 (list, name) -> {
                     list.add(name);
@@ -84,24 +83,28 @@ Stream<User> users = db.select("SELECT * FROM USERS")
 	  Map<Long, UserAttr> attrs = session.select(
 		"SELECT * FROM USER_ATTR WHERE id IN (:ids)",
                 entry("ids", batchOfUsers.stream().map(User::getId).collect(Collectors.toList()))
-          ).execute().groupingBy(UserAttr::userId, Function::identity);
+          ).execute(rs -> {
+			UserAttr attr = new UserAttr();
+			attr.setId(rs.getLong("attr_id"));
+			attr.setUserId(rs.getLong("user_id"));
+			attr.setName(rs.getString("attr_name"));
+			// etc...
+			return attr;
+		  })
+              .groupingBy(UserAttr::userId, Function::identity);
 	  batchOfUsers.forEach(user -> user.addAttrs(attrs.getOrDefault(user.getId, Collections.emptyList())));
 	});
 // stream of users objects will consist of updated (enriched) objects
 ```
 Using this to process batches you must keep some things in mind:
-<ul>
-<li>Executor service is used internally to power parallel processing</li>
-<li>All batches are processed regardless any possible short circuits</li>
-<li><code>Select.fetchSize</code> and <code>Select.ForBatch.size</code> are not the same but connected</li>
-</ul>
++ Executor service is used internally to power parallel processing</li>
++ All batches are processed regardless any possible short circuits</li>
++ <code>Select.fetchSize</code> and <code>Select.ForBatch.size</code> are not the same but connected</li>
 
 ##### Metadata processing
 For the special cases when only a metadata of the query is needed `Select.forMeta` can be used:
 ```java
 // suppose we want to collect information of which column of the provided query is a primary key
-import java.util.HashMap;
-
 Map<String, Boolean> processedMeta = db.select("SELECT * FROM TEST").forMeta(metadata -> {
   Map<String, Boolean> map = new HashMap<>();
   metadata.forEachColumn(columnIndex -> map.put(metadata.getName(columnIndex), metadata.isPrimaryKey(columnIndex)));
@@ -119,8 +122,7 @@ Or with named parameters:
 ```java
 long res = db.update("INSERT INTO TEST(name) VALUES(:name)", new SimpleImmutableEntry<>("name","New_Name")).execute();
 // in java9+
-import static java.util.Map.entry;
-long res = db.update("INSERT INTO TEST(name) VALUES(:name)", entry("name","New_Name")).execute();
+long res = db.update("INSERT INTO TEST(name) VALUES(:name)", Map.entry("name","New_Name")).execute();
 ```
 ##### Getting generated keys
 To retrieve possible generated keys provide a mapping function to `execute` method:
@@ -139,8 +141,7 @@ long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name",
   new SimpleImmutableEntry<>("new_name", "name_2")
 ).execute();
 // in java9+
-import static java.util.Map.entry;
-long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name", entry(":name", "new_name_2"), entry(":new_name", "name_2")).execute();
+long res = db.update("UPDATE TEST SET NAME=:name WHERE NAME=:new_name", Map.entry(":name", "new_name_2"), Map.entry(":new_name", "name_2")).execute();
 ```
 ##### Batch mode
 For batch operation use:
@@ -163,20 +164,20 @@ Note that in the latter case stored procedure must not return any result sets.
 ### Scripts
 There are two options to run an arbitrary SQL scripts:
 
-1) Provide a script itself
++ Provide a script itself
 ```java
 db.script("CREATE TABLE TEST (id INTEGER NOT NULL, name VARCHAR(255));INSERT INTO TEST(id, name) VALUES(1, 'whatever');UPDATE TEST SET name = 'whatever_new' WHERE name = 'whatever';DROP TABLE TEST;").execute();
 ```
-2) Provide a file with an SQL script
++ Provide a file with an SQL script
 ```java
 db.script(new File("path/to/script.sql")).timeout(60).execute();
 ```
 Script:
-<br/>Can contain single- and multiline comments. 
-<br/>Each statement must be separated by a semicolon (";").
-<br/>Execution results ignored and not handled after all.
-<br/>Support named parameters
-<br/>Support escaped syntax, so it is possible to include JDBC-like procedure call statements.
++ Can contain single- and multiline comments. 
++ Each statement must be separated by a semicolon (";").
++ Execution results ignored and not handled after all.
++ Support named parameters
++ Support escaped syntax, so it is possible to include JDBC-like procedure call statements.
 
 ### Transactions
 Long story short - an example:
@@ -208,8 +209,8 @@ User latestUser = db.transaction()
 ```
 ##### Nested transactions and deadlocks
 Providing connection supplier function with plain connection
-<br/>like this: <code>DB db = DB.create(() -> connection));</code>
-<br/>or this: &nbsp;&nbsp;<code>DB db = DB.builder().withMaxConnections(1).build(() -> DriverManager.getConnection("vendor-specific-string"));</code>
+<br/>like this: ```DB db = DB.create(() -> connection));```
+<br/>or this: &nbsp;&nbsp;```DB db = DB.builder().withMaxConnections(1).build(() -> DriverManager.getConnection("vendor-specific-string"));```
 <br/> e.g - if supplier function always return the same connection
 <br/>the concept of transactions will be partially broken.
 
@@ -223,7 +224,7 @@ db.transaction().run(session1 -> db.transaction().run(session2 -> {}))
 ### Logging & Debugging
 Convenient logging methods provided.
 ```java
-Logger LOG = ... // configure logger
+Logger LOG = // ... 
 db.select("SELECT * FROM TEST WHERE id=?", 7).print(LOG::debug).single(rs -> {/*map rs here*/});
 ```
 The above will print a current query to provided logger with debug method.
@@ -237,15 +238,15 @@ For <code>Script</code> query <code>verbose()</code> method can be used to track
 db.script("SELECT * FROM TEST WHERE id=:id;DROP TABLE TEST", new SimpleImmutableEntry<>("id", 5)).verbose().execute();
 ```
 This will print out to standard output two lines:
-<br/><code>SELECT * FROM TEST WHERE id=5</code>
-<br/><code>DROP TABLE TEST</code>
+<br/>```SELECT * FROM TEST WHERE id=5```
+<br/>```DROP TABLE TEST```
 <br/>Each line will be appended to output at the moment of execution.
-<br/>Calling <code>print()</code> on <code>Script</code> will print out the whole sql script with parameters substituted.
+<br/>Calling ```print()``` on ```Script``` will print out the whole sql script with parameters substituted.
 <br/>Custom logging handler may also be provided for both cases.
 
 ### Built-in mappers
-All <code>Select</code> query methods which takes a <code>mapper</code> function has a companion one without.
-<br/> Calling that <code>mapper</code>-less methods will imply mapping to a tuple as <code>String</code> alias to <code>Object</code> value:
+All ```Select``` query methods which takes a ```mapper``` function has a companion one without.
+<br/> Calling that ```mapper```-less methods will imply mapping to a tuple as ```String``` alias to ```Object``` value:
 ```java
 List<Map<String, Object>> = db.select("SELECT name FROM TEST").execute().collect(Collectors.toList());
 ```
