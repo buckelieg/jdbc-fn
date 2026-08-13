@@ -15,8 +15,6 @@
  */
 package buckelieg.jdbc;
 
-import javax.annotation.Nonnull;
-import javax.annotation.ParametersAreNonnullByDefault;
 import java.io.PrintStream;
 import java.util.function.Consumer;
 
@@ -25,7 +23,6 @@ import java.util.function.Consumer;
  * <br/>Result is an execution time (in milliseconds) taken the whole series to complete
  */
 @SuppressWarnings("unchecked")
-@ParametersAreNonnullByDefault
 public interface Script extends Query<Script> {
 
   /**
@@ -33,7 +30,6 @@ public interface Script extends Query<Script> {
    *
    * @return script execution time in milliseconds
    */
-  @Nonnull
   Long execute();
 
   /**
@@ -44,7 +40,6 @@ public interface Script extends Query<Script> {
    * @param skipErrors false if to stop on the first error, true (the default) - otherwise
    * @return script query abstraction
    */
-  @Nonnull
   Script skipErrors(boolean skipErrors);
 
   /**
@@ -54,7 +49,6 @@ public interface Script extends Query<Script> {
    * @param logger query string consumer
    * @return a script query abstraction
    */
-  @Nonnull
   Script verbose(Consumer<String> logger);
 
   /**
@@ -65,7 +59,6 @@ public interface Script extends Query<Script> {
    * @see System#out
    * @see PrintStream#println(String)
    */
-  @Nonnull
   default Script verbose() {
 	return verbose(System.out::println);
   }

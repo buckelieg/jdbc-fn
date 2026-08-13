@@ -13,21 +13,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 /**
  * Functional style programming over plain JDBC
- * <br/>Function collection to be used in conjunction with main classes
+ * <br/>A collection of functions to be used in conjunction with main classes
  *
- * @see buckelieg.jdbc.fn.TryRunnable
- * @see buckelieg.jdbc.fn.TrySupplier
- * @see buckelieg.jdbc.fn.TryConsumer
- * @see buckelieg.jdbc.fn.TryBiConsumer
- * @see buckelieg.jdbc.fn.TryTriConsumer
- * @see buckelieg.jdbc.fn.TryQuadConsumer
- * @see buckelieg.jdbc.fn.TryFunction
- * @see buckelieg.jdbc.fn.TryBiFunction
- * @see buckelieg.jdbc.fn.TryTriFunction
- * @see buckelieg.jdbc.fn.TryQuadFunction
- * @see buckelieg.jdbc.fn.TryPredicate
- * @see buckelieg.jdbc.fn.TryBiPredicate
+ * @see buckelieg.fn.TryRunnable
+ * @see buckelieg.fn.TrySupplier
+ * @see buckelieg.fn.TryConsumer
+ * @see buckelieg.fn.TryBiConsumer
+ * @see buckelieg.fn.TryTriConsumer
+ * @see buckelieg.fn.TryQuadConsumer
+ * @see buckelieg.fn.TryFunction
+ * @see buckelieg.fn.TryBiFunction
+ * @see buckelieg.fn.TryTriFunction
+ * @see buckelieg.fn.TryQuadFunction
+ * @see buckelieg.fn.TryPredicate
+ * @see buckelieg.fn.TryBiPredicate
  */
-package buckelieg.jdbc.fn;
+package buckelieg.fn;

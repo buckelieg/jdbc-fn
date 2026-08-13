@@ -13,9 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
-
-import javax.annotation.Nonnull;
+package buckelieg.fn;
 
 import static java.util.Objects.requireNonNull;
 
@@ -47,7 +45,6 @@ public interface TryTriConsumer<I1, I2, I3, E extends Throwable> {
    * @param <E>  exception type
    * @return a type-checked {@linkplain #NOOP} constant
    */
-  @Nonnull
   @SuppressWarnings("unchecked")
   static <I1, I2, I3, E extends Throwable> TryTriConsumer<I1, I2, I3, E> NOOP() {
 	return (TryTriConsumer<I1, I2, I3, E>) NOOP;

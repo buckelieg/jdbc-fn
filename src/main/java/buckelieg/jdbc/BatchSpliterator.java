@@ -15,12 +15,15 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryBiFunction;
-import buckelieg.jdbc.fn.TryConsumer;
-import buckelieg.jdbc.fn.TryTriConsumer;
+import buckelieg.fn.TryBiFunction;
+import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TryTriConsumer;
 
 import java.sql.SQLException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Spliterator;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -32,7 +35,13 @@ import java.util.function.Consumer;
 
 import static buckelieg.jdbc.Utils.entry;
 import static buckelieg.jdbc.Utils.newSQLRuntimeException;
-import static java.sql.JDBCType.*;
+import static java.sql.JDBCType.BLOB;
+import static java.sql.JDBCType.CLOB;
+import static java.sql.JDBCType.LONGNVARCHAR;
+import static java.sql.JDBCType.LONGVARBINARY;
+import static java.sql.JDBCType.LONGVARCHAR;
+import static java.sql.JDBCType.NCLOB;
+import static java.util.Collections.emptyList;
 
 // TODO implement using CompletableFuture?
 final class BatchSpliterator<T> implements Spliterator<T> {
@@ -104,20 +113,20 @@ final class BatchSpliterator<T> implements Spliterator<T> {
   public boolean tryAdvance(Consumer<? super T> action) {
 	if (!init()) return false;
 	if (batchCount.get() > 0) {
-	  for (T item : next())
-		action.accept(item);
+	  List<T> items = next();
+	  if (null == items) return false;
+	  for (T item : items) action.accept(item);
 	  return true;
 	} else return false;
   }
 
   private List<T> next() {
 	try {
-	  int count = batchCount.getAndDecrement();
-	  Map.Entry<List<T>, Integer> batch = 0 == count ? entry(Collections.emptyList(), 0) : processedBatchesQueue.take();
-	  return batch.getKey();
+	  return (0 == batchCount.getAndDecrement() ? Utils.<List<T>, Integer>entry(emptyList(), 0) : processedBatchesQueue.take()).getKey();
 	} catch (InterruptedException e) {
 	  Thread.currentThread().interrupt();
-	  throw new RuntimeException(e);
+	  handleException(e);
+	  return null;
 	}
   }
 
@@ -125,7 +134,7 @@ final class BatchSpliterator<T> implements Spliterator<T> {
 	if (!isClosing.getAndSet(true)) {
 	  cancellationRequested.compareAndSet(false, true);
 	  // gracefully closing query:
-	  // here we have to drain all data from all tasks which are be pending or running at the moment and might use a session (connection)
+	  // here we have to drain all data from all tasks which pending or running at the moment and might use a session (connection)
 	  do {
 		next(); // TODO are there any chances to short circuit these out?
 	  } while (!submittedTasks.stream().allMatch(Future::isDone));
@@ -144,12 +153,12 @@ final class BatchSpliterator<T> implements Spliterator<T> {
 		selectQuery.statement = selectQuery.prepareStatement();
 		selectQuery.resultSet = selectQuery.doExecute(selectQuery.statement);
 		if (selectQuery.resultSet != null) {
-		  selectQuery.meta = new RSMeta(selectQuery.getConnection()::getMetaData, selectQuery.resultSet::getMetaData, selectQuery.metaCache);
-		  session = new Session(selectQuery.metaCache, selectQuery::getConnection, TryConsumer.NOOP(), selectQuery.executorServiceSupplier);
+		  selectQuery.meta = new MetadataImpl(selectQuery.getConnection()::getMetaData, selectQuery.resultSet::getMetaData, selectQuery.metaCache);
+		  session = new Session(selectQuery.metaCache, selectQuery::getConnection, TryConsumer.NOOP(), selectQuery.executorService);
 		  selectQuery.wrapper = ValueGetters.reader(selectQuery.meta, selectQuery.resultSet);
 		  size = selectQuery.meta.containsAny(LONGVARBINARY, LONGNVARCHAR, LONGVARCHAR, BLOB, CLOB, NCLOB) ? 1 : size;
 		  processedBatchesQueue = new ArrayBlockingQueue<>(size);
-		  executorService = selectQuery.executorServiceSupplier.get();
+		  executorService = selectQuery.executorService;
 		} else {
 		  selectQuery.finisher.run();
 		  initializationResult.set(false);
@@ -179,8 +188,7 @@ final class BatchSpliterator<T> implements Spliterator<T> {
 		  batchCount.compareAndSet(-1, batchIndex.get());
 		  executionStarted.compareAndSet(false, true);
 		} catch (SQLException e) {
-		  exception.compareAndSet(null, e);
-		  cancellationRequested.set(true);
+		  handleException(e);
 		}
 	  });
 	}
@@ -198,16 +206,24 @@ final class BatchSpliterator<T> implements Spliterator<T> {
 	if (!cancellationRequested.get()) {
 	  submittedTasks.add(executorService.submit(() -> {
 		try {
-		  batchProcessor.accept(batch, session, index);
-		  processedBatchesQueue.put(entry(batch, index));
+		  if (cancellationRequested.get()) processedBatchesQueue.put(entry(emptyList(), index));
+		  else {
+			batchProcessor.accept(batch, session, index);
+			processedBatchesQueue.put(entry(batch, index));
+		  }
 		} catch (InterruptedException e) {
 		  Thread.currentThread().interrupt();
-		  exception.compareAndSet(null, e);
+		  handleException(e);
 		} catch (Exception e) {
-		  exception.compareAndSet(null, e);
-		  cancellationRequested.set(true);
+		  handleException(e);
 		}
 	  }));
 	}
   }
+
+  private void handleException(Exception e) {
+	exception.compareAndSet(null, e);
+	cancellationRequested.compareAndSet(false, true);
+  }
+
 }

@@ -15,12 +15,10 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryConsumer;
-import buckelieg.jdbc.fn.TryRunnable;
-import buckelieg.jdbc.fn.TrySupplier;
+import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TryRunnable;
+import buckelieg.fn.TrySupplier;
 
-import javax.annotation.Nonnull;
-import javax.annotation.ParametersAreNonnullByDefault;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -28,21 +26,19 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static java.lang.Math.max;
 import static java.util.Objects.requireNonNull;
 
 @SuppressWarnings("unchecked")
-@ParametersAreNonnullByDefault
 abstract class AbstractQuery<Q extends Query<Q>, S extends Statement> implements Query<Q> {
 
   protected S statement;
   protected final String query;
   protected final TrySupplier<Connection, SQLException> connectionSupplier;
   private final TryConsumer<Connection, ? extends Throwable> connectionConsumer;
-  protected final Supplier<ExecutorService> executorServiceSupplier;
+  protected final ExecutorService executorService;
   protected boolean skipWarnings = true;
   protected final boolean isPrepared;
   protected int timeout;
@@ -57,12 +53,12 @@ abstract class AbstractQuery<Q extends Query<Q>, S extends Statement> implements
   AbstractQuery(
 		  TrySupplier<Connection, SQLException> connectionSupplier,
 		  TryConsumer<Connection, ? extends Throwable> connectionConsumer,
-		  Supplier<ExecutorService> executorServiceSupplier,
+		  ExecutorService executorService,
 		  String query, Object... params) {
 	this.query = query;
 	this.connectionSupplier = connectionSupplier;
 	this.connectionConsumer = connectionConsumer;
-	this.executorServiceSupplier = executorServiceSupplier;
+	this.executorService = executorService;
 	this.params = params;
 	this.isPrepared = params != null && params.length != 0;
   }
@@ -86,19 +82,19 @@ abstract class AbstractQuery<Q extends Query<Q>, S extends Statement> implements
   }
 
   final void setQueryBasicParameters(S statement) throws SQLException {
-	accept(() -> statement.setQueryTimeout(max((int) requireNonNull(unit, "Time Unit must be provided").toSeconds(timeout), 0)));
-	accept(() -> statement.setPoolable(poolable));
-	accept(() -> statement.setEscapeProcessing(escapeProcessing));
+	accept(() -> {
+	  statement.setQueryTimeout(max((int) requireNonNull(unit, "Time Unit must be provided").toSeconds(timeout), 0));
+	  statement.setPoolable(poolable);
+	  statement.setEscapeProcessing(escapeProcessing);
+	});
   }
 
-  @Nonnull
   @Override
   public Q poolable(boolean poolable) {
 	this.poolable = poolable;
 	return (Q) this;
   }
 
-  @Nonnull
   @Override
   public Q timeout(int timeout, TimeUnit unit) {
 	this.unit = requireNonNull(unit, "Time unit must be provided");
@@ -106,21 +102,18 @@ abstract class AbstractQuery<Q extends Query<Q>, S extends Statement> implements
 	return (Q) this;
   }
 
-  @Nonnull
   @Override
   public Q escaped(boolean escapeProcessing) {
 	this.escapeProcessing = escapeProcessing;
 	return (Q) this;
   }
 
-  @Nonnull
   @Override
   public Q skipWarnings(boolean skipWarnings) {
 	this.skipWarnings = skipWarnings;
 	return (Q) this;
   }
 
-  @Nonnull
   @Override
   public Q print(Consumer<String> printer) {
 	if (null == printer)
@@ -134,7 +127,7 @@ abstract class AbstractQuery<Q extends Query<Q>, S extends Statement> implements
 	  action.run();
 	  if (!skipWarnings && statement.getWarnings() != null) throw statement.getWarnings();
 	} catch (AbstractMethodError ame) {
-	  // ignore this possible vendor-specific JDBC driver's error.
+	  // silently ignore this possible vendor-specific JDBC driver's error.
 	}
   }
 
@@ -142,7 +135,6 @@ abstract class AbstractQuery<Q extends Query<Q>, S extends Statement> implements
 	return Utils.asSQL(query, params);
   }
 
-  @Nonnull
   @Override
   public final String asSQL() {
 	return asSQL(query, params);

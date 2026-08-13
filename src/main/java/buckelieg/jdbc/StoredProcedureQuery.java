@@ -15,38 +15,37 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryConsumer;
-import buckelieg.jdbc.fn.TryFunction;
-import buckelieg.jdbc.fn.TrySupplier;
+import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TryFunction;
+import buckelieg.fn.TrySupplier;
 
-import javax.annotation.Nonnull;
-import javax.annotation.ParametersAreNonnullByDefault;
-import javax.annotation.concurrent.NotThreadSafe;
-import java.sql.*;
+import java.sql.CallableStatement;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
+import java.sql.SQLType;
+import java.sql.Statement;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 
-@NotThreadSafe
-@ParametersAreNonnullByDefault
 final class StoredProcedureQuery extends SelectQuery implements StoredProcedure {
 
   StoredProcedureQuery(
-		  Map<String, RSMeta.Column> metaCache,
+		  Map<String, MetadataImpl.Column> metaCache,
 		  TrySupplier<Connection, SQLException> connectionSupplier,
 		  TryConsumer<Connection, ? extends Throwable> connectionConsumer,
-		  Supplier<ExecutorService> executorServiceSupplier,
+		  ExecutorService executorService,
 		  String query, P<?>... params) {
-	super(metaCache, connectionSupplier, connectionConsumer, executorServiceSupplier, query, (Object[]) params);
+	super(metaCache, connectionSupplier, connectionConsumer, executorService, query, (Object[]) params);
   }
 
-  @Nonnull
   @Override
   public <T> Select call(TryFunction<ValueReader, T, SQLException> mapper, Consumer<T> consumer) {
 	if (null == mapper) throw new NullPointerException("Mapper must be provided");
@@ -54,7 +53,10 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
 	this.finisher = () -> {
 	  if (mapper != null && consumer != null && isPrepared) {
 		try {
-		  consumer.accept(mapper.apply(ValueGetters.reader(meta, (CallableStatement) statement)));
+		  consumer.accept(mapper.apply(ValueGetters.reader(
+				  new MetadataImpl(getConnection()::getMetaData, ((CallableStatement) statement)::getMetaData, metaCache),
+				  (CallableStatement) statement
+		  )));
 		} catch (SQLException e) {
 		  throw new RuntimeException(e);
 		}
@@ -63,27 +65,23 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
 	return this;
   }
 
-  @Nonnull
   @Override
   public StoredProcedure timeout(int timeout) {
 	return (StoredProcedure) super.timeout(timeout);
   }
 
-  @Nonnull
   @Override
   public StoredProcedure skipWarnings(boolean skipWarnings) {
 	return (StoredProcedure) super.skipWarnings(skipWarnings);
   }
 
-  @Nonnull
   @Override
   public StoredProcedure print(Consumer<String> printer) {
 	return (StoredProcedure) super.print(printer);
   }
 
-  @SuppressWarnings("unchecked")
-  @Nonnull
   @Override
+  @SuppressWarnings("unchecked")
   public Stream<Map<String, Object>> execute() {
 	AtomicReference<TryFunction<ValueReader, Map<String, Object>, SQLException>> mapper = new AtomicReference<>();
 	return execute((rs, i) -> {
@@ -102,8 +100,7 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
   protected Statement prepareStatement() throws SQLException {
 	if (isPrepared) {
 	  CallableStatement callableStatement = getConnection().prepareCall(query);
-	  meta = new RSMeta(getConnection()::getMetaData, callableStatement::getMetaData, metaCache);
-	  ValueWriter writer = ValueSetters.writer(meta, callableStatement);
+	  ValueWriter writer = ValueSetters.writer(callableStatement);
 	  for (int i = 1; i <= params.length; i++) {
 		P<?> p = (P<?>) params[i - 1];
 		if (p.isOut() || p.isInOut()) {

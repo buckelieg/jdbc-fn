@@ -15,11 +15,8 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryConsumer;
+import buckelieg.fn.TryConsumer;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-import javax.annotation.ParametersAreNonnullByDefault;
 import java.sql.JDBCType;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -35,7 +32,6 @@ import static java.util.stream.Collectors.toList;
  * Database {@link ResultSet} metadata helper
  * <br/>Typical use-case is to access its methods inside data manipulation handlers
  */
-@ParametersAreNonnullByDefault
 public interface Metadata {
 
   /**
@@ -44,8 +40,8 @@ public interface Metadata {
    * @param columnName a name of the column to test existence with
    * @return true if the column with provided name exists, false - otherwise
    */
-  default boolean exists(@Nullable String columnName) {
-	return null != columnName && !columnName.trim().isEmpty() && names().stream().anyMatch(col -> col.equalsIgnoreCase(columnName));
+  default boolean exists(String columnName) {
+	return indexOf(columnName) != -1;
   }
 
   /**
@@ -53,7 +49,6 @@ public interface Metadata {
    *
    * @return a {@link List} of column names that are a primary keys or empty if none
    */
-  @Nonnull
   default List<String> primaryKeys() {
 	return names().stream().filter(this::isPrimaryKey).collect(toList());
   }
@@ -63,7 +58,6 @@ public interface Metadata {
    *
    * @return a {@link List} of column names that are a foreign keys or empty if none
    */
-  @Nonnull
   default List<String> foreignKeys() {
 	return names().stream().filter(this::isForeignKey).collect(toList());
   }
@@ -73,7 +67,6 @@ public interface Metadata {
    *
    * @return a {@link List} of column names in this {@link ResultSet}
    */
-  @Nonnull
   List<String> names();
 
   /**
@@ -92,7 +85,6 @@ public interface Metadata {
    * @return a name of the column under provided index
    * @throws IllegalArgumentException if {@code columnIndex} is less than 1
    */
-  @Nonnull
   String getName(int columnIndex);
 
   /**
@@ -112,7 +104,6 @@ public interface Metadata {
    * @return column label
    * @see java.sql.ResultSetMetaData#getColumnLabel(int)
    */
-  @Nonnull
   String getLabel(int columnIndex);
 
   /**
@@ -120,7 +111,6 @@ public interface Metadata {
    *
    * @return a {@link List} of <i>full</i> column names in this {@link ResultSet}
    */
-  @Nonnull
   List<String> getColumnFullNames();
 
   /**
@@ -183,7 +173,6 @@ public interface Metadata {
    * @return an {@link SQLType} of the column
    * @see java.sql.JDBCType
    */
-  @Nonnull
   SQLType getSQLType(int columnIndex);
 
   /**
@@ -194,7 +183,6 @@ public interface Metadata {
    * @throws NullPointerException if <code>columnName</code> is null
    * @see java.sql.JDBCType
    */
-  @Nonnull
   SQLType getSQLType(String columnName);
 
   /**
@@ -240,8 +228,8 @@ public interface Metadata {
    *
    * @param columnIndex column index in the result
    * @return a {@link Class} representing this column
+   * @throws IllegalArgumentException if there is no column under provided {@code columnIndex}
    */
-  @Nonnull
   Class<?> getClass(int columnIndex);
 
   /**
@@ -250,8 +238,8 @@ public interface Metadata {
    * @param columnName column name in the result
    * @return a {@link Class} representing this column
    * @throws NullPointerException if <code>columnName</code> is null
+   * @throws IllegalArgumentException if there is no column under provided {@code columnName}
    */
-  @Nonnull
   Class<?> getClass(String columnName);
 
   /**
@@ -260,7 +248,6 @@ public interface Metadata {
    * @param columnIndex column index in the result
    * @return a referenced table's full name (e.g. catalog.schema.table_name) if the column under provided index is a foreign key column
    */
-  @Nonnull
   Optional<String> getReferencedTable(int columnIndex);
 
   /**
@@ -269,8 +256,7 @@ public interface Metadata {
    * @param columnName column name in the result
    * @return a referenced table's full name (e.g. catalog.schema.table_name) if the column under provided name is a foreign key column
    */
-  @Nonnull
-  Optional<String> getReferencedTable(@Nullable String columnName);
+  Optional<String> getReferencedTable(String columnName);
 
   /**
    * Performs provided {@code action} on each column index in this {@linkplain ResultSet} object

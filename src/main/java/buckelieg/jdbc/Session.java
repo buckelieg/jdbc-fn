@@ -15,11 +15,9 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryConsumer;
-import buckelieg.jdbc.fn.TrySupplier;
+import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TrySupplier;
 
-import javax.annotation.Nonnull;
-import javax.annotation.ParametersAreNonnullByDefault;
 import java.io.File;
 import java.nio.charset.Charset;
 import java.sql.Connection;
@@ -28,9 +26,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.function.BiFunction;
-import java.util.function.Supplier;
 
-import static buckelieg.jdbc.Utils.*;
+import static buckelieg.jdbc.Utils.checkAnonymous;
+import static buckelieg.jdbc.Utils.checkSingle;
+import static buckelieg.jdbc.Utils.entry;
+import static buckelieg.jdbc.Utils.isAnonymous;
+import static buckelieg.jdbc.Utils.isProcedure;
+import static buckelieg.jdbc.Utils.prepareQuery;
+import static buckelieg.jdbc.Utils.wipeComments;
 import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.nio.file.Files.readAllBytes;
@@ -48,23 +51,22 @@ import static java.util.stream.Stream.of;
  * @see StoredProcedure
  * @see Script
  */
-@ParametersAreNonnullByDefault
 public class Session {
 
   final TrySupplier<Connection, SQLException> connectionSupplier;
-  final Map<String, RSMeta.Column> metaCache;
+  final Map<String, MetadataImpl.Column> metaCache;
   final TryConsumer<Connection, ? extends Throwable> connectionCloser;
-  final Supplier<ExecutorService> executorServiceSupplier;
+  final ExecutorService executorService;
 
   Session(
-		  Map<String, RSMeta.Column> metaCache,
+		  Map<String, MetadataImpl.Column> metaCache,
 		  TrySupplier<Connection, SQLException> connectionSupplier,
 		  TryConsumer<Connection, ? super Throwable> connectionCloser,
-		  Supplier<ExecutorService> executorServiceSupplier) {
+		  ExecutorService executorService) {
 	this.connectionSupplier = connectionSupplier;
 	this.metaCache = metaCache;
 	this.connectionCloser = connectionCloser;
-	this.executorServiceSupplier = executorServiceSupplier;
+	this.executorService = executorService;
   }
 
   /**
@@ -76,10 +78,9 @@ public class Session {
    * @throws NullPointerException if <code>script</code> is null
    * @see Script
    */
-  @Nonnull
   @SuppressWarnings({"unchecked", "rawtypes"})
   public Script script(String script, Map<String, ?> namedParameters) {
-	return new ScriptQuery(connectionSupplier, connectionCloser, executorServiceSupplier, wipeComments(requireNonNull(script, "SQL script must be provided")), namedParameters.entrySet());
+	return new ScriptQuery(connectionSupplier, connectionCloser, executorService, wipeComments(requireNonNull(script, "SQL script must be provided")), namedParameters.entrySet());
   }
 
   /**
@@ -92,10 +93,9 @@ public class Session {
    * @see Script
    */
   @SafeVarargs
-  @Nonnull
   @SuppressWarnings({"unchecked", "rawtypes"})
   public final <T extends Map.Entry<String, ?>> Script script(String script, T... namedParameters) {
-	return new ScriptQuery(connectionSupplier, connectionCloser, executorServiceSupplier, wipeComments(requireNonNull(script, "SQL script must be provided")), asList(namedParameters));
+	return new ScriptQuery(connectionSupplier, connectionCloser, executorService, wipeComments(requireNonNull(script, "SQL script must be provided")), asList(namedParameters));
   }
 
   /**
@@ -110,7 +110,6 @@ public class Session {
    * @see #script(String, Map.Entry[])
    * @see Charset
    */
-  @Nonnull
   public <T extends Map.Entry<String, ?>> Script script(File source, Charset encoding, T... namedParameters) {
 	try {
 	  return script(new String(readAllBytes(requireNonNull(source, "Source file must be provided").toPath()), requireNonNull(encoding, "File encoding must be provided")), namedParameters);
@@ -128,7 +127,6 @@ public class Session {
    * @throws RuntimeException in case of any errors (like {@link java.io.FileNotFoundException} or source file is null)
    * @see #script(File, Charset, Map.Entry[])
    */
-  @Nonnull
   public <T extends Map.Entry<String, ?>> Script script(File source, T... namedParameters) {
 	return script(source, UTF_8, namedParameters);
   }
@@ -141,7 +139,6 @@ public class Session {
    * @see StoredProcedure
    * @see #procedure(String, P[])
    */
-  @Nonnull
   public StoredProcedure procedure(String query) {
 	return procedure(query, new Object[0]);
   }
@@ -156,9 +153,8 @@ public class Session {
    * @see StoredProcedure
    * @see #procedure(String, P[])
    */
-  @Nonnull
   public StoredProcedure procedure(String query, Object... parameters) {
-	return procedure(query, stream(parameters).map(P::in).collect(toList()).toArray(new P<?>[parameters.length]));
+	return procedure(query, stream(parameters).map(P::in).toArray(P<?>[]::new));
   }
 
   /**
@@ -173,7 +169,6 @@ public class Session {
    * @throws IllegalArgumentException if provided query is not valid DML statement or named parameters provided along with unnamed ones
    * @see StoredProcedure
    */
-  @Nonnull
   public StoredProcedure procedure(String query, P<?>... parameters) {
 	query = checkSingle(requireNonNull(query, "SQL query must be provided"));
 	if (isAnonymous(query) && !isProcedure(query)) {
@@ -191,7 +186,7 @@ public class Session {
 		));
 	  }
 	}
-	return new StoredProcedureQuery(metaCache, connectionSupplier, connectionCloser, executorServiceSupplier, query, parameters);
+	return new StoredProcedureQuery(metaCache, connectionSupplier, connectionCloser, executorService, query, parameters);
   }
 
   /**
@@ -203,11 +198,10 @@ public class Session {
    * @throws IllegalArgumentException if provided query is a procedure call statement
    * @see Select
    */
-  @Nonnull
   public Select select(String query, Object... parameters) {
 	requireNonNull(query, "SQL query must be provided");
 	if (isProcedure(query)) throw new IllegalArgumentException(format("Query '%s' is not valid select statement", query));
-	return new SelectQuery(metaCache, connectionSupplier, connectionCloser, executorServiceSupplier, checkAnonymous(checkSingle(query)), parameters);
+	return new SelectQuery(metaCache, connectionSupplier, connectionCloser, executorService, checkAnonymous(checkSingle(query)), parameters);
   }
 
   /**
@@ -218,7 +212,6 @@ public class Session {
    * @throws IllegalArgumentException if provided query is a procedure call statement
    * @see Select
    */
-  @Nonnull
   public Select select(String query) {
 	return select(query, new Object[0]);
   }
@@ -234,7 +227,6 @@ public class Session {
    * @throws IllegalArgumentException if provided query is a procedure call statement
    * @see Select
    */
-  @Nonnull
   public Select select(String query, Map<String, ?> namedParameters) {
 	return select(query, requireNonNull(namedParameters, "Named parameters must be provided").entrySet());
   }
@@ -250,7 +242,6 @@ public class Session {
    * @throws IllegalArgumentException if provided query is a procedure call statement
    * @see Select
    */
-  @Nonnull
   @SafeVarargs
   public final <T extends Map.Entry<String, ?>> Select select(String query, T... namedParameters) {
 	return select(query, asList(namedParameters));
@@ -267,7 +258,6 @@ public class Session {
    * @throws IllegalArgumentException if provided query is a procedure call statement
    * @see Update
    */
-  @Nonnull
   public Update update(String query, Map<String, ?>... batch) {
 	List<Map.Entry<String, Object[]>> params = of(batch).map(np -> prepareQuery(query, np.entrySet())).collect(toList());
 	return update(params.get(0).getKey(), params.stream().map(Map.Entry::getValue).collect(toList()).toArray(new Object[params.size()][]));
@@ -282,11 +272,10 @@ public class Session {
    * @throws IllegalArgumentException if provided query is a procedure call statement
    * @see Update
    */
-  @Nonnull
   public Update update(String query, Object[]... batch) {
 	requireNonNull(query, "SQL query must be provided");
 	if (isProcedure(query)) throw new IllegalArgumentException(format("Query '%s' is not valid DML statement", query));
-	return new UpdateQuery(connectionSupplier, connectionCloser, executorServiceSupplier, checkAnonymous(checkSingle(query)), batch);
+	return new UpdateQuery(connectionSupplier, connectionCloser, executorService, checkAnonymous(query), batch);
   }
 
   /**
@@ -297,7 +286,6 @@ public class Session {
    * @throws IllegalArgumentException if provided query is a procedure call statement
    * @see Update
    */
-  @Nonnull
   public Update update(String query) {
 	return update(query, new Object[0]);
   }
@@ -311,7 +299,6 @@ public class Session {
    * @throws IllegalArgumentException if provided query is a procedure call statement
    * @see Update
    */
-  @Nonnull
   public Update update(String query, Object... parameters) {
 	return update(query, new Object[][]{parameters});
   }
@@ -327,7 +314,6 @@ public class Session {
    * @throws IllegalArgumentException if provided query is a procedure call statement
    * @see Update
    */
-  @Nonnull
   public <T extends Map.Entry<String, ?>> Update update(String query, T... namedParameters) {
 	return update(query, asList(namedParameters));
   }

@@ -15,7 +15,6 @@
  */
 package buckelieg.jdbc;
 
-import javax.annotation.Nonnull;
 import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -32,7 +31,6 @@ final class BoxedPrimitiveIterable implements Iterable<Number> {
 	this.length = getLength(array);
   }
 
-  @Nonnull
   @Override
   public Iterator<Number> iterator() {
 	return new Iterator<Number>() {

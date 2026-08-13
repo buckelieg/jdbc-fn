@@ -15,12 +15,10 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryBiFunction;
-import buckelieg.jdbc.fn.TryConsumer;
-import buckelieg.jdbc.fn.TrySupplier;
+import buckelieg.fn.TryBiFunction;
+import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TrySupplier;
 
-import javax.annotation.Nonnull;
-import javax.annotation.ParametersAreNonnullByDefault;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Savepoint;
@@ -38,7 +36,6 @@ import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 
-@ParametersAreNonnullByDefault
 final class JDBCTransaction implements Transaction {
 
   private Isolation isolation;
@@ -49,11 +46,11 @@ final class JDBCTransaction implements Transaction {
 
   private BiConsumer<? super Throwable, Context> errorHandler;
 
-  private final Map<String, RSMeta.Column> metaCache;
+  private final Map<String, MetadataImpl.Column> metaCache;
 
   private final Supplier<String> txIdProvider;
 
-  private final Supplier<ExecutorService> executorServiceSupplier;
+  private final ExecutorService executorService;
 
   private final TrySupplier<Connection, SQLException> connectionProvider;
 
@@ -62,19 +59,18 @@ final class JDBCTransaction implements Transaction {
   private final PrimitiveIterator.OfInt sequence = newIntSequence();
 
   JDBCTransaction(
-		  Supplier<ExecutorService> executorServiceSupplier,
+		  ExecutorService executorService,
 		  Supplier<String> txIdProvider,
-		  Map<String, RSMeta.Column> metaCache,
+		  Map<String, MetadataImpl.Column> metaCache,
 		  TrySupplier<Connection, SQLException> connectionProvider,
 		  TryConsumer<Connection, SQLException> connectionCloser) {
-	this.executorServiceSupplier = executorServiceSupplier;
+	this.executorService = executorService;
 	this.txIdProvider = txIdProvider;
 	this.connectionProvider = connectionProvider;
 	this.connectionCloser = connectionCloser;
 	this.metaCache = metaCache;
   }
 
-  @Nonnull
   @Override
   public <T> T execute(TryBiFunction<Session, Context, T, ? extends Exception> transaction) {
 	if (null == transaction) throw new NullPointerException("Transaction function must be provided");
@@ -85,28 +81,24 @@ final class JDBCTransaction implements Transaction {
 	}
   }
 
-  @Nonnull
   @Override
   public Transaction onBeforeCommit(Predicate<Context> beforeCommitHandler) {
 	this.beforeCommitHandler = requireNonNull(beforeCommitHandler, "Transaction before commit handler must be provided");
 	return this;
   }
 
-  @Nonnull
   @Override
   public Transaction onCommit(Consumer<Context> commitHandler) {
 	this.commitHandler = requireNonNull(commitHandler, "Transaction commit handler must be provided");
 	return this;
   }
 
-  @Nonnull
   @Override
   public Transaction onRollback(BiConsumer<? super Throwable, Context> rollbackHandler) {
 	this.errorHandler = requireNonNull(rollbackHandler, "Transaction error handler must be provided");
 	return this;
   }
 
-  @Nonnull
   @Override
   public Transaction isolation(Isolation level) {
 	this.isolation = requireNonNull(level, "Transaction isolation level must be provided");
@@ -129,6 +121,7 @@ final class JDBCTransaction implements Transaction {
 	  transactionContext = new Transaction.Context() {
 
 		private final AtomicReference<String> txId = new AtomicReference<>();
+
 		@Override
 		public String username() {
 		  return username;
@@ -136,18 +129,18 @@ final class JDBCTransaction implements Transaction {
 
 		@Override
 		public String transactionId() {
-		  return txId.updateAndGet(id -> id != null ? id : txIdProvider.get());
+		  return txId.updateAndGet(id -> null != id ? id : txIdProvider.get());
 		}
 
 	  };
 
 	  savepoint = connection.setSavepoint(format("SAVEPOINT_%s@%s", sequence.nextInt(), transactionContext.transactionId()));
-	  if (this.isolation != null && isolationLevel != this.isolation.level) {
+	  if (null != this.isolation && isolationLevel != this.isolation.level) {
 		if (!connection.getMetaData().supportsTransactionIsolationLevel(isolation.level))
 		  throw new SQLException(format("Unsupported transaction isolation level: '%s'", isolation.name()));
 		connection.setTransactionIsolation(isolation.level);
 	  }
-	  result = action.apply(new Session(metaCache, () -> connection, TryConsumer.NOOP(), executorServiceSupplier), transactionContext);
+	  result = action.apply(new Session(metaCache, () -> connection, TryConsumer.NOOP(), executorService), transactionContext);
 	  if (null != beforeCommitHandler && !beforeCommitHandler.test(transactionContext)) {
 		connection.rollback(savepoint);
 		connection.releaseSavepoint(savepoint);
@@ -158,8 +151,10 @@ final class JDBCTransaction implements Transaction {
 	  return result;
 	} catch (Exception e) {
 	  transactionSucceeded = false;
-	  connection.rollback(savepoint);
-	  connection.releaseSavepoint(savepoint);
+	  if (null != savepoint) {
+		connection.rollback(savepoint);
+		connection.releaseSavepoint(savepoint);
+	  }
 	  if (null != errorHandler) {
 		errorHandler.accept(e, transactionContext);
 		return null;

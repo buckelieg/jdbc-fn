@@ -15,16 +15,28 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryBiFunction;
-import buckelieg.jdbc.fn.TryTriFunction;
+import buckelieg.fn.TryBiFunction;
+import buckelieg.fn.TryTriFunction;
 
-import javax.annotation.Nonnull;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.Reader;
 import java.math.BigDecimal;
 import java.net.URL;
-import java.sql.*;
+import java.sql.Array;
+import java.sql.Blob;
+import java.sql.CallableStatement;
+import java.sql.Clob;
+import java.sql.Date;
+import java.sql.NClob;
+import java.sql.Ref;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.RowId;
+import java.sql.SQLException;
+import java.sql.SQLXML;
+import java.sql.Time;
+import java.sql.Timestamp;
 import java.util.Calendar;
 import java.util.Map;
 
@@ -92,7 +104,6 @@ final class ValueGetters implements ValueReader {
 	return null;
   }
 
-  @Nonnull
   @Override
   public Metadata meta() {
 	return metadata;

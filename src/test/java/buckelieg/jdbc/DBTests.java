@@ -15,41 +15,71 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryConsumer;
-import buckelieg.jdbc.fn.TryFunction;
+import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TryFunction;
 import org.apache.derby.jdbc.EmbeddedDataSource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.opentest4j.AssertionFailedError;
 
 import javax.sql.DataSource;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.nio.file.*;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.JDBCType;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.PrimitiveIterator;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import static buckelieg.jdbc.Utils.*;
+import static buckelieg.jdbc.Utils.checkSingle;
+import static buckelieg.jdbc.Utils.entry;
+import static buckelieg.jdbc.Utils.isAnonymous;
+import static buckelieg.jdbc.Utils.prepareQuery;
+import static buckelieg.jdbc.Utils.wipeComments;
 import static java.lang.String.format;
 import static java.lang.Thread.currentThread;
 import static java.util.Collections.singletonList;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.toList;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 
 // TODO more test suites for other RDBMS
@@ -105,9 +135,7 @@ public class DBTests {
 //        db = new DB(() -> conn);
 //        db = new DB(conn);
 //        db = DB.create(ds::getConnection);
-	db = DB.builder()
-			.withTransactionIdProvider(() -> "" + sequence.nextInt())
-			.build(ds::getConnection);
+	db = DB.create(ds);
   }
 
   @AfterAll
@@ -305,7 +333,7 @@ public class DBTests {
 
   @Test
   public void testSameNamedParameter() { // TODO derby bug?
-	assertThrows(SQLRuntimeException.class, () -> db.select("SELECT * FROM TEST WHERE 1=1 AND (ID = (CAST ? AS NUMBER)/* OR ID = (CAST :p2 AS NUMBER)*/)", 1, entry("p2", 1)).print(log::info).execute().count());
+	assertThrows(IllegalArgumentException.class, () -> db.select("SELECT * FROM TEST WHERE 1=1 AND (ID = (CAST ? AS NUMBER)/* OR ID = (CAST :p2 AS NUMBER)*/)", 1, entry("p2", 1)).print(log::info).execute().count());
   }
 
   @Test
@@ -496,21 +524,20 @@ public class DBTests {
 
   @Test
   public void testTransactions() {
-	Long result = db.transaction().isolation(Transaction.Isolation.SERIALIZABLE)
-			.execute(session ->
-					session.update("INSERT INTO test(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
-							.batch(2)
-							.skipWarnings(false)
-							.timeout(1, TimeUnit.MINUTES)
-							.print(log::info)
-							.execute(rs -> rs.getLong(1))
-							.stream()
-							.peek(id -> session.procedure("call ECHO(?)", id).call())
-							.max(Comparator.comparing(i -> i))
-							.flatMap(gId -> session.select("SELECT * FROM test WHERE id=?", gId).print(log::info).single(rs -> rs.getLong(1)))
-							.orElse(-1L)
-			);
-	log.info(db.select("SELECT * FROM test WHERE id=?", result).print(log::info).single());
+	Long result = db.transaction().isolation(Transaction.Isolation.SERIALIZABLE).execute(session ->
+			session.update("INSERT INTO test(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
+					.batch(2)
+					.skipWarnings(false)
+					.timeout(1, TimeUnit.MINUTES)
+					.print(log::info)
+					.execute(rs -> rs.getLong(1))
+					.stream()
+					.peek(id -> session.procedure("call ECHO(?)", id).call())
+					.max(Comparator.comparing(Function.identity()))
+					.flatMap(gId -> session.select("SELECT * FROM test WHERE id=?", gId).print(log::info).single(rs -> rs.getLong(1)))
+					.orElse(-1L)
+	);
+	log.info(db.select("SELECT * FROM test WHERE id=?", result).print(sql -> log.info("SQL = {}", sql)).single());
 	assertEquals(Long.valueOf(13L), result);
   }
 
@@ -535,8 +562,7 @@ public class DBTests {
 
   @Test
   public void testDeadlocksSingleConnectionSupplier() throws Exception {
-	Connection conn = ds.getConnection();
-	DB db1 = DB.builder().build(() -> conn);
+	DB db1 = DB.builder().build(new SingleConnectionDatasource(ds.getConnection()));
 	assertNotEquals(db1, db);
 	Assertions.assertThrows(
 			AssertionFailedError.class,
@@ -551,7 +577,7 @@ public class DBTests {
 
   @Test
   public void testDeadlocksMultiConnectionSupplierMaxConnections1() throws Exception {
-	DB db1 = DB.builder().withMaxConnections(1).build(ds::getConnection);
+	DB db1 = DB.create(ds);
 	assertNotEquals(db1, db);
 	Assertions.assertThrows(
 			AssertionFailedError.class,
@@ -565,10 +591,23 @@ public class DBTests {
   }
 
   @Test
-  public void testMaxConnectionsDriverManagerConnectionProvider() throws Exception {
+  public void testMaxConnectionsDriverManagerConnectionProvider() {
 	DB db1 = DB.builder()
-			.withMaxConnections(3)
-			.build(() -> DriverManager.getConnection("jdbc:derby:memory:test_dm;create=true"));
+			.withExecutorService(Executors.newWorkStealingPool())
+			.withTerminateExecutorServiceOnClose(false)
+			.build(dataSourceBuilder -> dataSourceBuilder
+					.withMaxConnections(3)
+					.withProperty("", "")
+					.withIdleConnectionTimeout(Duration.ofSeconds(5))
+					.withDriverClass("com.mysql.jdbc.Driver")
+					.withKeepAlivePolicy(policy -> {
+					  policy.setKeepAliveQuery("SELECT 1");
+					  policy.setExecutionSchedule(Duration.ofSeconds(5));
+					})
+					.withUser("")
+					.withPassword("")
+					.build("jdbc:derby:memory:test_dm;create=true")
+			);
 	db1.transaction().run(s1 -> db1.transaction().run(s2 -> db1.transaction().run(s3 -> {})));
 	Assertions.assertThrows(
 			AssertionFailedError.class,
@@ -583,9 +622,10 @@ public class DBTests {
 
   @Test
   public void testNoNewConnectionSupplierWithTransaction() throws Exception {
-	Connection conn = ds.getConnection();
 	PrimitiveIterator.OfInt seq = Utils.newIntSequence();
-	DB db1 = DB.builder().withTransactionIdProvider(() -> "" + seq.nextInt()).build(() -> conn);
+	DB db1 = DB.builder()
+			.withTransactionIdProvider(() -> "" + seq.nextInt())
+			.build(new SingleConnectionDatasource(ds.getConnection()));
 	assertNotEquals(db1, db);
 	ExecutorService executorService = Executors.newFixedThreadPool(2);
 	CountDownLatch latch = new CountDownLatch(4);
@@ -636,7 +676,7 @@ public class DBTests {
 
   @Test
   public void testMaxConnections() throws Exception {
-	DB db1 = DB.builder().withMaxConnections(1).build(ds::getConnection);
+	DB db1 = DB.builder().build(ds);
 	Select select1 = db1.select("SELECT * FROM TEST");
 	Select select2 = db1.select("SELECT COUNT(*) FROM TEST");
 	Select select3 = db1.select("SELECT 1 FROM TEST");

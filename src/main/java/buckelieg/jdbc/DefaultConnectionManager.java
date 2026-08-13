@@ -15,20 +15,29 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TrySupplier;
+import buckelieg.fn.TryPredicate;
+import buckelieg.fn.TrySupplier;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
-import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static buckelieg.jdbc.Utils.newSQLRuntimeException;
+import static java.lang.String.format;
 
 final class DefaultConnectionManager implements ConnectionManager {
 
@@ -38,25 +47,45 @@ final class DefaultConnectionManager implements ConnectionManager {
 
   private final BlockingQueue<Connection> pool;
 
-  private final List<Connection> obtainedConnections;
+  private final Map<Connection, ConnectionMetadata> obtainedConnections = new ConcurrentHashMap<>();
 
   private final AtomicInteger size = new AtomicInteger(0);
 
   private final AtomicBoolean isShuttingDown = new AtomicBoolean(false);
 
-  private final AtomicLong activeConnections = new AtomicLong(0);
+  private final AtomicInteger activeSessions = new AtomicInteger(0);
 
   private final Duration waitOnClose;
 
-  DefaultConnectionManager(TrySupplier<Connection, SQLException> connectionSupplier, int maxConnections, Duration waitOnClose) {
+  private final Duration waitOnIdle;
+
+  private final AtomicReference<CountDownLatch> mutex = new AtomicReference<>();
+
+  private final ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
+
+  private final ScheduledFuture<?> keepAlive;
+
+  DefaultConnectionManager(
+		  TrySupplier<Connection, SQLException> connectionSupplier,
+		  int maxConnections,
+		  Duration waitOnClose,
+		  String keepAliveQuery,
+		  Duration waitOnIdle
+  ) {
 	this.connectionSupplier = connectionSupplier;
 	this.maxConnections = maxConnections;
 	this.pool = new ArrayBlockingQueue<>(maxConnections);
-	this.obtainedConnections = new CopyOnWriteArrayList<>();
 	this.waitOnClose = waitOnClose;
+	this.waitOnIdle = waitOnIdle;
+	this.keepAlive = Optional.ofNullable(keepAliveQuery)
+			.map(String::trim)
+			.filter(TryPredicate.not(String::isEmpty).toPredicate())
+			.filter(Utils::isSingle).filter(Utils::isAnonymous)
+			.filter(TryPredicate.not(Utils::isProcedure).toPredicate())
+			.map(query -> executorService.scheduleAtFixedRate(() -> executeQuery(query), waitOnIdle.toMillis(), waitOnIdle.toMillis(), TimeUnit.MILLISECONDS))
+			.orElse(null);
   }
 
-  @Nonnull
   @Override
   public Connection getConnection() throws SQLException {
 	if (isShuttingDown.get()) throw new SQLException("Connection pool is shutting down");
@@ -66,40 +95,66 @@ final class DefaultConnectionManager implements ConnectionManager {
 		size.incrementAndGet();
 		connection = connectionSupplier.get();
 		if (null == connection) throw new NullPointerException("Provided connection is null");
-		if (obtainedConnections.contains(connection)) connection = pool.take();
-		else obtainedConnections.add(connection);
+		if (obtainedConnections.containsKey(connection)) connection = pool.take();
+		else obtainedConnections.put(connection, ConnectionMetadata.of(connection));
 	  } else connection = pool.take();
+	  if (connection.isClosed()) {
+		close(connection);
+		connection = getConnection();
+	  }
+	  if (obtainedConnections.get(connection).isBusy.get() && pool.offer(connection)) connection = getConnection();
 	} catch (InterruptedException e) {
 	  Thread.currentThread().interrupt();
 	  throw new SQLException(e);
 	}
 	connection.setAutoCommit(false);
-	activeConnections.incrementAndGet();
+	activeSessions.incrementAndGet();
+	ConnectionMetadata metadata = obtainedConnections.get(connection);
+	metadata.lastTimeUsed.set(System.currentTimeMillis());
+	metadata.isBusy.compareAndSet(false, true);
 	return connection;
   }
 
   @Override
-  public void close(@Nullable Connection connection) throws SQLException {
+  public void close(Connection connection) throws SQLException {
 	if (null == connection) return;
-	connection.setAutoCommit(true);
-	activeConnections.decrementAndGet();
-	if (!pool.offer(connection)) throw new SQLException("Connection pool is full");
+	if (connection.isClosed()) {
+	  obtainedConnections.remove(connection);
+	  size.decrementAndGet();
+	} else {
+	  activeSessions.decrementAndGet();
+	  if (isShuttingDown.get()) {
+		mutex.updateAndGet(latch -> {
+		  if (null != latch) latch.countDown();
+		  return latch;
+		});
+		connection.close();
+		return;
+	  }
+	  ConnectionMetadata metadata = obtainedConnections.get(connection);
+	  connection.setAutoCommit(true);
+	  connection.clearWarnings();
+	  connection.setHoldability(metadata.holdability);
+	  connection.setReadOnly(metadata.readOnly);
+	  connection.setTransactionIsolation(metadata.isolationLevel);
+	  if (pool.offer(connection)) {
+		metadata.lastTimeUsed.set(System.currentTimeMillis());
+		metadata.isBusy.compareAndSet(true, false);
+	  } else throw new SQLException("Connection pool is full");
+	}
   }
 
   @Override
   public void close() throws SQLException {
+	if (null != keepAlive) keepAlive.cancel(true);
 	isShuttingDown.set(true);
-	if(activeConnections.get() > 0) {
-	  // gracefully closing pool waiting for configured time for existing transactions to complete
-	  try {
-		Thread.sleep(waitOnClose.toMillis());
-	  } catch (InterruptedException e) {
-		Thread.currentThread().interrupt();
-	  }
+	SQLException exception = null;
+	if (null != waitOnClose && activeSessions.get() > 0) { // gracefully closing pool waiting for configured time for existing transactions to complete
+	  mutex.updateAndGet(mutex -> null == mutex ? new CountDownLatch(activeSessions.get()) : mutex);
+	  if (!waitFor()) exception = new SQLException(format("Forcibly shutting down with unclosed sessions number of %s", activeSessions.get()));
 	}
 	pool.clear();
-	SQLException exception = null;
-	for (Connection connection : obtainedConnections) {
+	for (Connection connection : obtainedConnections.keySet()) {
 	  try {
 		connection.close();
 	  } catch (SQLException e) {
@@ -109,6 +164,38 @@ final class DefaultConnectionManager implements ConnectionManager {
 	}
 	obtainedConnections.clear();
 	if (null != exception) throw exception;
+  }
+
+  private void executeQuery(String query) {
+	if (isShuttingDown.get()) return;
+	long now = System.currentTimeMillis();
+	obtainedConnections.entrySet().stream()
+			.filter(entry -> (now - entry.getValue().lastTimeUsed.get()) > TimeUnit.SECONDS.toMillis(5))
+			.filter(entry -> !entry.getValue().isBusy.get())
+			.forEach(entry -> {
+			  entry.getValue().isBusy.compareAndSet(false, true);
+			  Connection connection = entry.getKey();
+			  ConnectionMetadata metadata = entry.getValue();
+			  try (Statement statement = connection.createStatement()) {
+				connection.setAutoCommit(false);
+				statement.execute(query);
+				connection.rollback();
+				connection.setAutoCommit(true);
+				metadata.lastTimeUsed.set(now);
+				metadata.isBusy.compareAndSet(true, false);
+			  } catch (SQLException e) {
+				throw newSQLRuntimeException(e);
+			  }
+			});
+  }
+
+  private boolean waitFor() {
+	try {
+	  return mutex.get().await(waitOnClose.toMillis(), TimeUnit.MILLISECONDS);
+	} catch (InterruptedException e) {
+	  Thread.currentThread().interrupt();
+	  return mutex.get().getCount() == 0;
+	}
   }
 
 }

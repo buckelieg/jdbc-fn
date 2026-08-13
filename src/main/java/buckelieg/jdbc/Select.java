@@ -15,11 +15,12 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.*;
+import buckelieg.fn.TryBiConsumer;
+import buckelieg.fn.TryBiFunction;
+import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TryFunction;
+import buckelieg.fn.TryTriConsumer;
 
-import javax.annotation.Nonnull;
-import javax.annotation.ParametersAreNonnullByDefault;
-import javax.annotation.concurrent.NotThreadSafe;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
@@ -36,8 +37,6 @@ import static java.util.Optional.ofNullable;
  * An abstraction for SELECT statement
  */
 @SuppressWarnings("unchecked")
-@NotThreadSafe
-@ParametersAreNonnullByDefault
 public interface Select extends Query<Select> {
 
   /**
@@ -55,7 +54,6 @@ public interface Select extends Query<Select> {
 	 * @param batchSize a size of a batch (must be positive number). Default value is {@code 1}
 	 * @return select for batch processing query abstraction
 	 */
-	@Nonnull
 	ForBatch<T> size(int batchSize);
 
 	/**
@@ -63,21 +61,16 @@ public interface Select extends Query<Select> {
 	 * <br/><table>
 	 * <caption>A {@code batchProcessor} function parameters</caption>
 	 * <tr>
-	 * <th>Argument</th>
-	 * <th>Type</th>
-	 * <th>Description</th>
+	 * <th>Argument</th><th>Type</th><th>Description</th>
 	 * </tr>
 	 * <tr>
-	 * <td>batch</td>
-	 * <td>{@linkplain List}</td>
-	 * <td>a list of items sliced by the {@linkplain #size(int)} value</td>
+	 * <td>batch</td><td>{@linkplain List}</td><td>a list of items sliced by the {@linkplain #size(int)} value</td>
 	 * </tr>
 	 * </table>
 	 *
 	 * @param batchProcessor a batch processor function
 	 * @return a {@linkplain Stream} of resulting (post-processed) items
 	 */
-	@Nonnull
 	default Stream<T> execute(TryConsumer<List<T>, ? extends Exception> batchProcessor) {
 	  if (null == batchProcessor) throw new NullPointerException("Batch processor function must be provided");
 	  return execute((batch, session) -> batchProcessor.accept(batch));
@@ -107,7 +100,6 @@ public interface Select extends Query<Select> {
 	 * @param batchProcessor a batch processor function
 	 * @return a {@linkplain Stream} of resulting (post-processed) items
 	 */
-	@Nonnull
 	default Stream<T> execute(TryBiConsumer<List<T>, Session, ? extends Exception> batchProcessor) {
 	  if (null == batchProcessor) throw new NullPointerException("Batch processor function must be provided");
 	  return execute((batch, session, batchIndex) -> batchProcessor.accept(batch, session));
@@ -142,7 +134,6 @@ public interface Select extends Query<Select> {
 	 * @param batchProcessor a batch processor function
 	 * @return a {@linkplain Stream} of resulting (post-processed) items
 	 */
-	@Nonnull
 	Stream<T> execute(TryTriConsumer<List<T>, Session, Integer, ? extends Exception> batchProcessor);
 
   }
@@ -172,7 +163,6 @@ public interface Select extends Query<Select> {
    * @param <T>    an element type
    * @return select for batch processing query abstraction
    */
-  @Nonnull
   <T> ForBatch<T> forBatch(TryBiFunction<ValueReader, Integer, T, SQLException> mapper);
 
   /**
@@ -180,7 +170,6 @@ public interface Select extends Query<Select> {
    * @param <T>    an element type
    * @return select for batch processing query abstraction
    */
-  @Nonnull
   default <T> ForBatch<T> forBatch(TryFunction<ValueReader, T, SQLException> mapper) {
 	if (null == mapper) throw new NullPointerException("Mapper must be provided");
 	return forBatch((rs, i) -> mapper.apply(rs));
@@ -189,7 +178,6 @@ public interface Select extends Query<Select> {
   /**
    * @return select for batch processing query abstraction
    */
-  @Nonnull
   default ForBatch<Map<String, Object>> forBatch() {
 	return forBatch(JDBCDefaults::defaultMapper);
   }
@@ -206,15 +194,14 @@ public interface Select extends Query<Select> {
    * <tr>
    * <td>meta</td>
    * <td>{@linkplain Metadata}</td>
-   * <td>a convenient wrapper for {@linkplain ResultSet} metadata read</td>
+   * <td>a convenient wrapper for {@linkplain java.sql.ResultSetMetaData} metadata read</td>
    * </tr>
    * </table>
    *
    * @param mapper {@linkplain Metadata} mapper
-   * @return a {@linkplain Metadata} for this query
+   * @return a {@linkplain Metadata} for this {@linkplain ResultSet#getMetaData()} query
    * @throws NullPointerException if {@code mapper} is null
    */
-  @Nonnull
   <T> T forMeta(Function<Metadata, T> mapper);
 
   /**
@@ -238,11 +225,11 @@ public interface Select extends Query<Select> {
    * @throws NullPointerException if <code>mapper</code> is null
    * @see #execute(TryFunction)
    */
-  @Nonnull
   default <T> Optional<T> single(TryFunction<ValueReader, T, SQLException> mapper) {
 	T result;
 	try {
-	  result = fetchSize(1).maxRows(1).execute(mapper).collect(Collectors.toList()).iterator().next();
+	  List<T> list = fetchSize(1).maxRows(1).execute(mapper).collect(Collectors.toList());
+	  result = list.iterator().next();
 	} catch (NoSuchElementException e) {
 	  result = null;
 	} catch (Exception e) {
@@ -257,7 +244,6 @@ public interface Select extends Query<Select> {
    *
    * @return an {@link Optional} with the {@link Map} as a value
    */
-  @Nonnull
   default Optional<Map<String, Object>> single() {
 	return single(JDBCDefaults::defaultMapper);
   }
@@ -268,7 +254,6 @@ public interface Select extends Query<Select> {
    * @return a {@link Stream} of {@link Map}s
    * @see #execute(TryFunction)
    */
-  @Nonnull
   default Stream<Map<String, Object>> execute() {
 	return execute(JDBCDefaults::defaultMapper);
   }
@@ -298,7 +283,6 @@ public interface Select extends Query<Select> {
    * @return a {@link Stream} over mapped {@link ResultSet}
    * @throws NullPointerException if <code>mapper</code> is null
    */
-  @Nonnull
   <T> Stream<T> execute(TryBiFunction<ValueReader, Integer, T, SQLException> mapper);
 
   /**
@@ -325,7 +309,6 @@ public interface Select extends Query<Select> {
    * @see #execute()
    * @see ValueReader
    */
-  @Nonnull
   default <T> Stream<T> execute(TryFunction<ValueReader, T, SQLException> mapper) {
 	if (null == mapper) throw new NullPointerException("Mapper must be provided");
 	return execute((rs, i) -> mapper.apply(rs));
@@ -341,7 +324,6 @@ public interface Select extends Query<Select> {
    * @see java.sql.Statement#setFetchSize(int)
    * @see ResultSet#setFetchSize(int)
    */
-  @Nonnull
   Select fetchSize(int size);
 
   /**
@@ -351,7 +333,6 @@ public interface Select extends Query<Select> {
    * @return select query abstraction
    * @see java.sql.Statement#setMaxRows(int)
    */
-  @Nonnull
   Select maxRows(int max);
 
   /**
@@ -361,6 +342,5 @@ public interface Select extends Query<Select> {
    * @return select query abstraction
    * @see java.sql.Statement#setLargeMaxRows(long)
    */
-  @Nonnull
   Select maxRows(long max);
 }

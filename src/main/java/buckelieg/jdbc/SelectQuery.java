@@ -15,35 +15,35 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryBiFunction;
-import buckelieg.jdbc.fn.TryConsumer;
-import buckelieg.jdbc.fn.TrySupplier;
-import buckelieg.jdbc.fn.TryTriConsumer;
+import buckelieg.fn.TryBiFunction;
+import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TrySupplier;
+import buckelieg.fn.TryTriConsumer;
 
-import javax.annotation.Nonnull;
-import javax.annotation.ParametersAreNonnullByDefault;
-import javax.annotation.concurrent.NotThreadSafe;
-import java.sql.*;
-import java.util.HashMap;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-import static buckelieg.jdbc.Utils.*;
+import static buckelieg.jdbc.Utils.newSQLRuntimeException;
+import static buckelieg.jdbc.Utils.proxy;
+import static buckelieg.jdbc.Utils.setStatementParameters;
 import static java.lang.Math.max;
 import static java.sql.ResultSet.FETCH_FORWARD;
 
-@NotThreadSafe
-@ParametersAreNonnullByDefault
+@SuppressWarnings("SqlSourceToSinkFlow")
 class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
 
-  protected final Map<String, RSMeta.Column> metaCache;
+  protected final Map<String, MetadataImpl.Column> metaCache;
 
   protected AtomicInteger currentResultSetNumber = new AtomicInteger();
 
@@ -57,21 +57,18 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
 
   private long maxRowsLong = -1L;
 
-  private final Map<String, String> columnNamesMappings = new HashMap<>();
-
   protected volatile Metadata meta;
 
   SelectQuery(
-		  Map<String, RSMeta.Column> metaCache,
+		  Map<String, MetadataImpl.Column> metaCache,
 		  TrySupplier<Connection, SQLException> connectionSupplier,
 		  TryConsumer<Connection, ? extends Throwable> connectionConsumer,
-		  Supplier<ExecutorService> executorServiceSupplier,
+		  ExecutorService executorService,
 		  String query, Object... params) {
-	super(connectionSupplier, connectionConsumer, executorServiceSupplier, query, params);
+	super(connectionSupplier, connectionConsumer, executorService, query, params);
 	this.metaCache = metaCache;
   }
 
-  @Nonnull
   @Override
   public final <T> ForBatch<T> forBatch(TryBiFunction<ValueReader, Integer, T, SQLException> mapper) {
 	if (null == mapper) throw new NullPointerException("Mapper must be provided");
@@ -79,7 +76,6 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
 
 	  int batchSize = fetchSize;
 
-	  @Nonnull
 	  @Override
 	  public ForBatch<T> size(int batchSize) {
 		this.batchSize = max(1, batchSize);
@@ -87,7 +83,6 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
 	  }
 
 	  @SuppressWarnings("unchecked")
-	  @Nonnull
 	  @Override
 	  public Stream<T> execute(TryTriConsumer<List<T>, Session, Integer, ? extends Exception> batchProcessor) {
 		if (null == batchProcessor) throw new NullPointerException("Batch processor must be provided");
@@ -97,14 +92,17 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
 	};
   }
 
-  @Nonnull
   @Override
   public <T> T forMeta(Function<Metadata, T> mapper) {
 	if (null == mapper) throw new NullPointerException("Mapper must be provided");
+	TrySupplier<ResultSetMetaData, SQLException> metadataSupplier;
 	try {
 	  statement = prepareStatement();
-	  resultSet = doExecute(statement);
-	  return mapper.apply(new RSMeta(getConnection()::getMetaData, resultSet::getMetaData, metaCache));
+	  if (!isPrepared) {
+		resultSet = doExecute(statement);
+		metadataSupplier = null == resultSet ? null : resultSet::getMetaData;
+	  } else metadataSupplier = ((PreparedStatement) statement)::getMetaData;
+	  return mapper.apply(new MetadataImpl(getConnection()::getMetaData, metadataSupplier, metaCache));
 	} catch (SQLException e) {
 	  throw newSQLRuntimeException(e);
 	} finally {
@@ -113,7 +111,6 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
   }
 
   @SuppressWarnings("unchecked")
-  @Nonnull
   @Override
   public final <T> Stream<T> execute(TryBiFunction<ValueReader, Integer, T, SQLException> mapper) {
 	if (null == mapper) throw new NullPointerException("Mapper must be provided");
@@ -125,14 +122,12 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
 	return isPrepared ? ((PreparedStatement) statement).executeQuery() : statement.execute(query) ? statement.getResultSet() : null;
   }
 
-  @Nonnull
   @Override
   public final Select fetchSize(int size) {
 	this.fetchSize = max(1, size);
 	return this;
   }
 
-  @Nonnull
   @Override
   public final Select maxRows(int max) {
 	this.maxRowsInt = max(0, max);
@@ -140,7 +135,6 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
 	return this;
   }
 
-  @Nonnull
   @Override
   public final Select maxRows(long max) {
 	this.maxRowsLong = max(0, max);
@@ -150,23 +144,18 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
 
   protected Statement prepareStatement() throws SQLException {
 	return isPrepared
-			? setStatementParameters(getConnection().prepareStatement(query), params)
-			: getConnection().createStatement();
-  }
+			? setStatementParameters(getConnection().prepareStatement(query, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY), params)
+			: getConnection().createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
 
-  private String getColumnName(String columnName, Metadata meta) {
-	return columnNamesMappings.computeIfAbsent(columnName, name -> meta.names().stream().filter(c -> c.equalsIgnoreCase(name)).findFirst().orElse(name));
-  }
-
-  private String getColumnName(String columnName, Map<String, Object> row) {
-	return columnNamesMappings.computeIfAbsent(columnName, name -> row.keySet().stream().filter(Objects::nonNull).filter(c -> c.equalsIgnoreCase(name)).findFirst().orElse(name));
   }
 
   protected final void configureStatement(Statement statement) throws SQLException {
 	setQueryBasicParameters(statement);
 	if (fetchSize > 0) {
-	  accept(() -> statement.setFetchSize(fetchSize)); // 0 value is ignored by Statement.setFetchSize;
-	  accept(() -> statement.setFetchDirection(FETCH_FORWARD));
+	  accept(() -> {
+		statement.setFetchSize(fetchSize); // 0 value is ignored by Statement.setFetchSize;
+		statement.setFetchDirection(FETCH_FORWARD);
+	  });
 	}
 	if (maxRowsInt != -1) accept(() -> statement.setMaxRows(maxRowsInt));
 	if (maxRowsLong != -1L) accept(() -> statement.setLargeMaxRows(maxRowsLong));

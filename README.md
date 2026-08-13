@@ -69,31 +69,32 @@ Stream<Entity> entities = db.select("SELECT * FROM HUGE_TABLE")
         .forBatch(/* map resultSet here to needed type*/)
         .size(1000)
         .execute(batchOfObjects -> {
-		  // list of mapped rows with size not more than 1000
-		  batchOfObjects.forEach(obj -> obj.setSomethingElse());
+          // list of mapped rows with size not more than 1000
+          batchOfObjects.forEach(obj -> obj.setSomethingElse());
         });
 ```
 For cases where it is needed to issue any additional queries to database use:
 ```java
 // suppose the USERS table contains thousands of records
 Stream<User> users = db.select("SELECT * FROM USERS")
+    .fetchSize(2000) // 2000 rows per one roundtrip to DB...
     .forBatch(rs -> new User(rs.getLong("id"), rs.getString("name")))
-    .size(1000)
+    .size(1000) // ...split by batch sized of 1000 items
     .execute((batchOfUsers, session) -> {
-	  Map<Long, UserAttr> attrs = session.select(
-		"SELECT * FROM USER_ATTR WHERE id IN (:ids)",
-                entry("ids", batchOfUsers.stream().map(User::getId).collect(Collectors.toList()))
+	  Map<Long, List<UserAttr>> attrs = session.select(
+            "SELECT * FROM USER_ATTR WHERE id IN (SELECT attr_id FROM USER_TO_ATTR WHERE user_id IN (:ids))",
+            entry("ids", batchOfUsers.stream().map(User::getId).collect(Collectors.toList()))
           ).execute(rs -> {
-			UserAttr attr = new UserAttr();
-			attr.setId(rs.getLong("attr_id"));
-			attr.setUserId(rs.getLong("user_id"));
-			attr.setName(rs.getString("attr_name"));
-			// etc...
-			return attr;
-		  })
-          .groupingBy(UserAttr::userId, Function.identity());
+            UserAttr attr = new UserAttr();
+            attr.setId(rs.getLong("id"));
+            attr.setName(rs.getString("name"));
+            attr.setValue(rs.getObject("value"));
+            attr.setUserId(rs.getLong("user_id")); // suppose we have an explicit property for this
+            return attr;
+          })
+          .collect(Collectors.groupingBy(UserAttr::getUserId, Function.identity()));
 	  batchOfUsers.forEach(user -> user.addAttrs(attrs.getOrDefault(user.getId(), Collections.emptyList())));
-	});
+    });
 // stream of users objects will consist of updated (enriched) objects
 ```
 Using this to process batches you must keep some things in mind:
@@ -165,10 +166,12 @@ Note that in the latter case stored procedure must not return any result sets.
 There are two options to run an arbitrary SQL scripts:
 
 + Provide a script itself
+
 ```java
 db.script("CREATE TABLE TEST (id INTEGER NOT NULL, name VARCHAR(255));INSERT INTO TEST(id, name) VALUES(1, 'whatever');UPDATE TEST SET name = 'whatever_new' WHERE name = 'whatever';DROP TABLE TEST;").execute();
 ```
 + Provide a file with an SQL script
+
 ```java
 db.script(new File("path/to/script.sql")).timeout(60).execute();
 ```
@@ -185,27 +188,43 @@ Long story short - an example:
 ```java
 // suppose we have to insert a bunch of new users by name and get the latest one filled with its attributes....
 
+import java.util.AbstractMap;
+import java.util.function.Function;
+
 Logger LOG = getLogger(); //... logger used in application 
 User latestUser = db.transaction()
-  .isolation(Transaction.Isolation.SERIALIZABLE)
-  .execute(session ->
-      session.update("INSERT INTO users(name) VALUES(?)", new Object[][]{ {"name1"}, {"name2"}, {"name3"} })
-        .skipWarnings(false)
-        .timeout(1, TimeUnit.MINUTES)
-        .print(LOG::debug)
-        .execute(rs -> rs.getLong(1))
-        .stream()
-        .peek(id -> session.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call())
-        .max(Comparator.comparing(i -> i))
-        .flatMap(id -> session.select("SELECT * FROM users WHERE id=?", id).print(LOG::debug).single(rs -> {
-		  User u = new User();
-		  u.setId(rs.getLong("id"));
-		  u.setName(rs.getString("name"));
-		  // ...fill other user's attributes...
-		  return user;
-        }))
-        .orElse(null)
-);
+        .isolation(Transaction.Isolation.SERIALIZABLE)
+        .execute(session -> 
+                session.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
+                        .skipWarnings(false)
+                        .timeout(1, TimeUnit.MINUTES)
+                        .print(LOG::debug)
+                        .execute(rs -> rs.getLong(1))
+                        .stream()
+                        .peek(id -> session.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call())
+                        .max(Comparator.comparing(Function.identity()))
+                        .flatMap(id -> session.select("SELECT * FROM users WHERE id=?", id)
+                                .print(LOG::debug)
+                                .single(rs -> new User(rs.getLong("id"), rs.getString("name")))
+                        )
+                        .map(user -> {
+                          // fill other user attributes e.g.
+                          session.select("SELECT * FROM USER_ATTR WHERE user_id = ?", user.getId())
+                                  .execute(rs -> new UserAttr(rs.getLong("id"), rs.getString("name"), rs.getObject("value")))
+                                  .forEach(user::addAttr);
+                          // or if we have POJO with getters/setters...
+                          session.select("SELECT * FROM USER_ATTR WHERE user_id = ?", user.getId())
+                                  .execute(rs -> new AbstractMap.SimpleImmutableEntry<>(rs.getString("name"), rs.getObject("value")))
+                                  .forEach(e -> {
+                                    if("someKey".equals(e.getKey())) {
+                                      user.setPropertyA(e.getValue());
+                                    }
+                                    // etc...
+                                  });
+                          return user;
+                        })
+                        .orElse(null)
+        );
 ```
 ##### Nested transactions and deadlocks
 Providing connection supplier function with plain connection

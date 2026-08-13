@@ -13,32 +13,34 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.fn;
 
 import static java.util.Objects.requireNonNull;
 
 /**
- * Two-argument function with returned result that might throw an exception
+ * Three-argument function with returned result that might throw an exception
  * <br/>There is no requirement that a new or distinct result be returned each time the function is invoked
- * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #apply(Object, Object)}
+ * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #apply(Object, Object, Object)}
  *
  * @param <I1> first input argument type
  * @param <I2> second input argument type
+ * @param <I3> third input argument type
  * @param <O>  result type
  * @param <E>  an exception type thrown
  */
 @FunctionalInterface
-public interface TryBiFunction<I1, I2, O, E extends Throwable> {
+public interface TryTriFunction<I1, I2, I3, O, E extends Throwable> {
 
     /**
-     * Represents a two-argument function which might throw an Exception
+     * Represents a three-argument function which might throw an Exception
      *
      * @param input1 first argument
      * @param input2 second argument
+     * @param input3 third argument
      * @return output
      * @throws E an exception
      */
-    O apply(I1 input1, I2 input2) throws E;
+    O apply(I1 input1, I2 input2, I3 input3) throws E;
 
     /**
      * Returns a composed function that first applies this function to
@@ -52,22 +54,22 @@ public interface TryBiFunction<I1, I2, O, E extends Throwable> {
      * @return a composed function that first applies this function and then
      * applies the {@code after} function
      * @throws E                    an exception
-     * @throws NullPointerException if <code>after</code>> is null
+     * @throws NullPointerException if <code>after</code> is null
      */
-    default <R> TryBiFunction<I1, I2, R, E> andThen(TryFunction<? super O, ? extends R, E> after) throws E {
-        if(null == after) throw new NullPointerException("after Function must be provided");
-        return (I1 input1, I2 input2) -> after.apply(apply(input1, input2));
+    default <R> TryTriFunction<I1, I2, I3, R, E> andThen(TryFunction<? super O, ? extends R, E> after) throws E {
+        if (null == after) throw new NullPointerException("after Function must be provided");
+        return (I1 input1, I2 input2, I3 input3) -> after.apply(apply(input1, input2, input3));
     }
 
     /**
      * Returns reference of lambda expression
      *
-     * @param tryBiFunction a function
-     * @return lambda as {@link TryBiFunction} reference
-     * @throws NullPointerException if <code>tryBiFunction</code> is null
+     * @param tryTriFunction a function
+     * @return lambda as {@link TryTriFunction} reference
+     * @throws NullPointerException if <code>tryTriFunction</code> is null
      */
-    static <I1, I2, O, E extends Throwable> TryBiFunction<I1, I2, O, E> of(TryBiFunction<I1, I2, O, E> tryBiFunction) {
-        return requireNonNull(tryBiFunction, "Function must be provided");
+    static <I1, I2, I3, O, E extends Throwable> TryTriFunction<I1, I2, I3, O, E> of(TryTriFunction<I1, I2, I3, O, E> tryTriFunction) {
+        return requireNonNull(tryTriFunction, "Function must be provided");
     }
 
 }

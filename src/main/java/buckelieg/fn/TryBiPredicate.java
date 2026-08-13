@@ -13,10 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.fn;
 
-import javax.annotation.Nonnull;
 import java.util.Objects;
+import java.util.function.BiPredicate;
 
 /**
  * Represents a predicate (boolean-valued function) of two arguments<br/>
@@ -49,7 +49,6 @@ public interface TryBiPredicate<I1, I2, E extends Throwable> {
    * @param <E>  exception type
    * @return a type-checked {@linkplain #TRUE} constant
    */
-  @Nonnull
   @SuppressWarnings("unchecked")
   static <I1, I2, E extends Throwable> TryBiPredicate<I1, I2, E> TRUE() {
 	return (TryBiPredicate<I1, I2, E>) TRUE;
@@ -61,7 +60,6 @@ public interface TryBiPredicate<I1, I2, E extends Throwable> {
    * @param <E>  exception type
    * @return a type-checked {@linkplain #FALSE} constant
    */
-  @Nonnull
   @SuppressWarnings("unchecked")
   static <I1, I2, E extends Throwable> TryBiPredicate<I1, I2, E> FALSE() {
 	return (TryBiPredicate<I1, I2, E>) FALSE;
@@ -129,6 +127,25 @@ public interface TryBiPredicate<I1, I2, E extends Throwable> {
   }
 
   /**
+   * Transforms this {@code TryBiPredicate} to {@linkplain BiPredicate} which tests the input values returning:<br/>
+   * <ul>
+   *   <li>a result of {@linkplain TryBiPredicate#test(Object, Object)} method invocation</li>
+   *   <li>{@code false} whenever exception is thrown</li>
+   * </ul>
+   *
+   * @return a {@linkplain BiPredicate} instance
+   */
+  default BiPredicate<I1, I2> toBiPredicate() {
+	return (input1, input2) -> {
+	  try {
+		return test(input1, input2);
+	  } catch (Throwable e) {
+		return false;
+	  }
+	};
+  }
+
+  /**
    * Returns reference of lambda expression
    *
    * @param tryBiPredicate a biPredicate function
@@ -139,6 +156,24 @@ public interface TryBiPredicate<I1, I2, E extends Throwable> {
    */
   static <I1, I2, E extends Throwable> TryBiPredicate<I1, I2, E> of(TryBiPredicate<I1, I2, E> tryBiPredicate) {
 	return Objects.requireNonNull(tryBiPredicate, "Predicate must be provided");
+  }
+
+  /**
+   * Returns a predicate that is the negation of the supplied predicate.
+   * This is accomplished by returning result of the calling
+   * {@code target.negate()}.
+   *
+   * @param <I1>   the type of first argument to the specified predicate
+   * @param <I2>   the type of second argument to the specified predicate
+   * @param target predicate to negate
+   * @return a predicate that negates the results of the supplied
+   * predicate
+   * @throws NullPointerException if {@code target} is null
+   */
+  @SuppressWarnings("unchecked")
+  static <I1, I2, E extends Throwable> TryBiPredicate<I1, I2, E> not(TryBiPredicate<? super I1, ? super I2, E> target) {
+	if (null == target) throw new NullPointerException("target Predicate must be provided");
+	return (TryBiPredicate<I1, I2, E>) target.negate();
   }
 }
 

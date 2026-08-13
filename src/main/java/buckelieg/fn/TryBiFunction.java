@@ -13,37 +13,32 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.fn;
 
 import static java.util.Objects.requireNonNull;
 
 /**
- * Four-argument function with returned result that might throw an exception
+ * Two-argument function with returned result that might throw an exception
  * <br/>There is no requirement that a new or distinct result be returned each time the function is invoked
- * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #apply(Object, Object, Object, Object)}
+ * <br/>This is a <a href="package-summary.html">functional interface</a> whose functional method is {@link #apply(Object, Object)}
  *
  * @param <I1> first input argument type
  * @param <I2> second input argument type
- * @param <I3> third input argument type
- * @param <I4> fourth input argument type
  * @param <O>  result type
  * @param <E>  an exception type thrown
  */
 @FunctionalInterface
-public interface TryQuadFunction<I1, I2, I3, I4, O, E extends Throwable> {
-
+public interface TryBiFunction<I1, I2, O, E extends Throwable> {
 
   /**
-   * Represents a four-argument function which returns a result and might throw an Exception
+   * Represents a two-argument function which might throw an Exception
    *
    * @param input1 first argument
    * @param input2 second argument
-   * @param input3 third argument
-   * @param input4 fourth argument
    * @return output
    * @throws E an exception
    */
-  O apply(I1 input1, I2 input2, I3 input3, I4 input4) throws E;
+  O apply(I1 input1, I2 input2) throws E;
 
   /**
    * Returns a composed function that first applies this function to
@@ -59,20 +54,20 @@ public interface TryQuadFunction<I1, I2, I3, I4, O, E extends Throwable> {
    * @throws E                    an exception
    * @throws NullPointerException if <code>after</code>> is null
    */
-  default <R> TryQuadFunction<I1, I2, I3, I4, R, E> andThen(TryFunction<? super O, ? extends R, E> after) throws E {
+  default <R> TryBiFunction<I1, I2, R, E> andThen(TryFunction<? super O, ? extends R, E> after) throws E {
 	if (null == after) throw new NullPointerException("after Function must be provided");
-	return (I1 input1, I2 input2, I3 input3, I4 input4) -> after.apply(apply(input1, input2, input3, input4));
+	return (I1 input1, I2 input2) -> after.apply(apply(input1, input2));
   }
 
   /**
    * Returns reference of lambda expression
    *
-   * @param tryQuadFunction a function
-   * @return lambda as a {@link TryQuadFunction} reference
-   * @throws NullPointerException if <code>tryQuadFunction</code> is null
+   * @param tryBiFunction a function
+   * @return lambda as {@link TryBiFunction} reference
+   * @throws NullPointerException if <code>tryBiFunction</code> is null
    */
-  static <I1, I2, I3, I4, O, E extends Throwable> TryQuadFunction<I1, I2, I3, I4, O, E> of(TryQuadFunction<I1, I2, I3, I4, O, E> tryQuadFunction) {
-	return requireNonNull(tryQuadFunction, "Function must be provided");
+  static <I1, I2, O, E extends Throwable> TryBiFunction<I1, I2, O, E> of(TryBiFunction<I1, I2, O, E> tryBiFunction) {
+	return requireNonNull(tryBiFunction, "Function must be provided");
   }
 
 }

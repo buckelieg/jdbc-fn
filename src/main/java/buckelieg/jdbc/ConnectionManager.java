@@ -15,15 +15,13 @@
  */
 package buckelieg.jdbc;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import java.sql.Connection;
 import java.sql.SQLException;
 
 /**
  * A manager that is responsible to create and destroy a connections to the database<br/>
  */
-public interface ConnectionManager extends AutoCloseable {
+interface ConnectionManager extends AutoCloseable {
 
   /**
    * Provides a {@linkplain Connection} instance. Either new one or from the pool (implementation-specific behaviour)
@@ -31,7 +29,6 @@ public interface ConnectionManager extends AutoCloseable {
    * @return a {@linkplain Connection} instance
    * @throws SQLException in case of any error
    */
-  @Nonnull
   Connection getConnection() throws SQLException;
 
   /**
@@ -40,7 +37,7 @@ public interface ConnectionManager extends AutoCloseable {
    * @param connection a connection to close
    * @throws SQLException is case of any error
    */
-  void close(@Nullable Connection connection) throws SQLException;
+  void close(Connection connection) throws SQLException;
 
   /**
    * Shuts down all possessed connections and clears all necessary resources
@@ -48,6 +45,6 @@ public interface ConnectionManager extends AutoCloseable {
    * @throws SQLException in case of any errors
    */
   @Override
-  void close() throws SQLException;
+  default void close() throws SQLException { }
 
 }

@@ -1,10 +1,25 @@
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.*;
+import buckelieg.fn.TryBiConsumer;
+import buckelieg.fn.TryBiFunction;
+import buckelieg.fn.TryBiPredicate;
+import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TryFunction;
+import buckelieg.fn.TryPredicate;
+import buckelieg.fn.TryQuadConsumer;
+import buckelieg.fn.TryQuadFunction;
+import buckelieg.fn.TryRunnable;
+import buckelieg.fn.TrySupplier;
+import buckelieg.fn.TryTriConsumer;
+import buckelieg.fn.TryTriFunction;
 import org.junit.jupiter.api.Test;
 import org.opentest4j.AssertionFailedError;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class FNTests {
 

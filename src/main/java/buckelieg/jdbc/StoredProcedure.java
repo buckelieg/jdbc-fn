@@ -15,10 +15,8 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryFunction;
+import buckelieg.fn.TryFunction;
 
-import javax.annotation.Nonnull;
-import javax.annotation.ParametersAreNonnullByDefault;
 import java.sql.CallableStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -32,8 +30,14 @@ import static java.util.Optional.ofNullable;
 /**
  * An abstraction for STORED PROCEDURE CALL statement
  */
-@ParametersAreNonnullByDefault
 public interface StoredProcedure extends Select {
+
+  class Builder {
+	private String procedureName;
+	private final List<P<?>> inParameters = new ArrayList<>();
+	private final List<P<?>> outParameters = new ArrayList<>();
+	private final List<P<?>> inOutParameters = new ArrayList<>();
+  }
 
   /**
    * Calls procedure for results processing which are expected in the OUT/INOUT parameters
@@ -59,7 +63,6 @@ public interface StoredProcedure extends Select {
    * @return select query abstraction
    * @throws NullPointerException if either <code>mapper</code> or <code>consumer</code> is null
    */
-  @Nonnull
   <T> Select call(TryFunction<ValueReader, T, SQLException> mapper, Consumer<T> consumer);
 
   /**
@@ -84,7 +87,6 @@ public interface StoredProcedure extends Select {
    * @see #call(TryFunction, Consumer)
    * @see Optional
    */
-  @Nonnull
   default <T> Optional<T> call(TryFunction<ValueReader, T, SQLException> mapper) {
 	if (null == mapper) throw new NullPointerException("Mapper must be provided");
 	List<Optional<T>> results = new ArrayList<>(1);
@@ -107,20 +109,17 @@ public interface StoredProcedure extends Select {
   /**
    * {@inheritDoc}
    */
-  @Nonnull
   @Override
   StoredProcedure skipWarnings(boolean skipWarnings);
 
   /**
    * {@inheritDoc}
    */
-  @Nonnull
   StoredProcedure print(Consumer<String> printer);
 
   /**
    * {@inheritDoc}
    */
-  @Nonnull
   default StoredProcedure print() {
 	return print(System.out::println);
   }

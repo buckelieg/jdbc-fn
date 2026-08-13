@@ -15,33 +15,44 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryBiConsumer;
-import buckelieg.jdbc.fn.TryBiFunction;
-import buckelieg.jdbc.fn.TryConsumer;
-import buckelieg.jdbc.fn.TryFunction;
+import buckelieg.fn.TryBiConsumer;
+import buckelieg.fn.TryBiFunction;
+import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TryFunction;
 
-import javax.annotation.Nonnull;
-import javax.annotation.ParametersAreNonnullByDefault;
 import java.sql.Connection;
-import java.util.function.*;
+import java.util.function.BiConsumer;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 
-import static java.sql.Connection.*;
+import static java.sql.Connection.TRANSACTION_NONE;
+import static java.sql.Connection.TRANSACTION_READ_COMMITTED;
+import static java.sql.Connection.TRANSACTION_READ_UNCOMMITTED;
+import static java.sql.Connection.TRANSACTION_REPEATABLE_READ;
+import static java.sql.Connection.TRANSACTION_SERIALIZABLE;
 
 /**
  * Represents a database <code>transaction</code>
  */
-@ParametersAreNonnullByDefault
 public interface Transaction {
 
   /**
    * Transaction isolation level
    *
+   * @see Connection#TRANSACTION_NONE
    * @see Connection#TRANSACTION_READ_UNCOMMITTED
    * @see Connection#TRANSACTION_READ_COMMITTED
    * @see Connection#TRANSACTION_REPEATABLE_READ
    * @see Connection#TRANSACTION_SERIALIZABLE
    */
   enum Isolation {
+
+	/**
+	 * Leve of {@link Connection#TRANSACTION_NONE}
+	 */
+	NONE(Connection.TRANSACTION_NONE),
 
 	/**
 	 * Level of {@link Connection#TRANSACTION_READ_UNCOMMITTED}
@@ -71,6 +82,8 @@ public interface Transaction {
 
 	public static Isolation valueOf(int level) {
 	  switch (level) {
+		case TRANSACTION_NONE:
+		  return NONE;
 		case TRANSACTION_READ_COMMITTED:
 		  return READ_COMMITTED;
 		case TRANSACTION_REPEATABLE_READ:
@@ -119,7 +132,6 @@ public interface Transaction {
    * @see Transaction#onCommit(Runnable)
    * @see Transaction#onRollback(Consumer)
    */
-  @Nonnull
   default <T> T execute(TryFunction<Session, T, ? extends Exception> transaction) {
 	if (null == transaction) throw new NullPointerException("Transaction function must be provided");
 	return execute((session, context) -> transaction.apply(session));
@@ -155,7 +167,6 @@ public interface Transaction {
    * @see Transaction#onCommit(Runnable)
    * @see Transaction#onRollback(Consumer)
    */
-  @Nonnull
   <T> T execute(TryBiFunction<Session, Context, T, ? extends Exception> transaction);
 
   /**
@@ -221,7 +232,6 @@ public interface Transaction {
    * @return a transaction instance
    * @throws NullPointerException if <code>beforeCommitHandler</code> is null
    */
-  @Nonnull
   Transaction onBeforeCommit(Predicate<Context> beforeCommitHandler);
 
   /**
@@ -233,7 +243,6 @@ public interface Transaction {
    * @return a transaction instance
    * @throws NullPointerException if <code>beforeCommitHandler</code> is null
    */
-  @Nonnull
   default Transaction onBeforeCommit(BooleanSupplier beforeCommitHandler) {
 	if (null == beforeCommitHandler) throw new NullPointerException("Transaction before commit handler must be provided");
 	return onBeforeCommit(context -> beforeCommitHandler.getAsBoolean());
@@ -247,7 +256,6 @@ public interface Transaction {
    * @return a transaction instance
    * @throws NullPointerException if <code>commitHandler</code> is null
    */
-  @Nonnull
   default Transaction onCommit(Runnable commitHandler) {
 	if (null == commitHandler) throw new NullPointerException("Transaction commit handler must be provided");
 	return onCommit(context -> commitHandler.run());
@@ -261,7 +269,6 @@ public interface Transaction {
    * @return a transaction instance
    * @throws NullPointerException if <code>commitHandler</code> is null
    */
-  @Nonnull
   Transaction onCommit(Consumer<Context> commitHandler);
 
   /**
@@ -273,7 +280,6 @@ public interface Transaction {
    * @throws NullPointerException if <code>rollbackHandler</code> is null
    * @see #onRollback(BiConsumer)
    */
-  @Nonnull
   default Transaction onRollback(Consumer<? super Throwable> rollbackHandler) {
 	if (null == rollbackHandler) throw new NullPointerException("Rollback handler must be provided");
 	return onRollback((exception, context) -> rollbackHandler.accept(exception));
@@ -289,7 +295,7 @@ public interface Transaction {
    * <th>Description</th>
    * </tr>
    * <tr>
-   * <td>session</td>
+   * <td>exception</td>
    * <td>{@linkplain Throwable}</td>
    * <td>an error object</td>
    * </tr>
@@ -314,7 +320,6 @@ public interface Transaction {
    * @throws NullPointerException if <code>level</code> is null
    * @see Isolation
    */
-  @Nonnull
   Transaction isolation(Isolation level);
 
 }

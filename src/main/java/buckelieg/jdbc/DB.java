@@ -15,24 +15,22 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TrySupplier;
+import buckelieg.fn.TrySupplier;
 
-import javax.annotation.Nonnull;
-import javax.annotation.ParametersAreNonnullByDefault;
-import javax.annotation.concurrent.ThreadSafe;
+import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-import static java.lang.Math.max;
+import static buckelieg.jdbc.Utils.newSQLRuntimeException;
+import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -41,147 +39,26 @@ import static java.util.Objects.requireNonNull;
  * @see Session
  * @see Transaction
  */
-@ThreadSafe
-@ParametersAreNonnullByDefault
 public final class DB extends Session {
 
-  private final Supplier<String> txIdProvider;
-
-  private final ConnectionManager connectionManager;
-
-  private final Supplier<ExecutorService> executorServiceProvider;
-
-  private final AtomicReference<ExecutorService> conveyor = new AtomicReference<>();
-
-  private final boolean terminateConveyorOnClose;
-
-  private final boolean terminateConnectionPoolOnClose;
-
-  private DB(
-		  Map<String, RSMeta.Column> metaCache,
-		  Supplier<String> txIdProvider,
-		  ConnectionManager connectionManager,
-		  Supplier<ExecutorService> executorServiceSupplier,
-		  boolean terminateConveyorOnClose,
-		  boolean terminateConnectionPoolOnClose) {
-	super(metaCache, connectionManager::getConnection, connectionManager::close, executorServiceSupplier);
-	this.txIdProvider = txIdProvider;
-	this.connectionManager = connectionManager;
-	this.executorServiceProvider = () -> getExecutorService(executorServiceSupplier);
-	this.terminateConveyorOnClose = terminateConveyorOnClose;
-	this.terminateConnectionPoolOnClose = terminateConnectionPoolOnClose;
-  }
-
-  private ExecutorService getExecutorService(Supplier<ExecutorService> executorServiceSupplier) {
-	return conveyor.updateAndGet(conveyor -> {
-	  if (conveyor == null || conveyor.isShutdown() || conveyor.isTerminated()) {
-		conveyor = requireNonNull(executorServiceSupplier.get(), "Executor service instance must be provided");
-	  }
-	  return conveyor;
-	});
-  }
-
-  /**
-   * Creates a transaction for the set of an arbitrary statements
-   * <br/>Example usage:
-   * <pre>{@code
-   *  // suppose we have to create a bunch of new users with provided names and get the latest one with all it's attributes filled in
-   *  DB db = // create DB instance
-   *  User latestUser = db.transaction().isolation(Transaction.Isolation.SERIALIZABLE).apply(session ->
-   *      session.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
-   *        .skipWarnings(false)
-   *        .timeout(1, TimeUnit.MINUTES)
-   *        .print() // prints to System.out
-   *        .execute(rs -> rs.getLong(1)) // returns a collection of generated ids
-   *        .stream()
-   *        .peek(id -> session.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call())
-   *        .max(Comparator.comparing(i -> i))
-   *        .flatMap(id -> session.select("SELECT * FROM users WHERE id=?", id).print().single(rs -> {
-   *              User u = new User();
-   *              u.setId(rs.getLong("id"));
-   *              u.setName(rs.getString("name"));
-   *              // ...fill other user's attributes...
-   *              return user;
-   *        }))
-   *        .orElse(null)
-   * );
-   * }</pre>
-   *
-   * @return a transaction instance
-   */
-  @Nonnull
-  public Transaction transaction() {
-	return new JDBCTransaction(executorServiceProvider, txIdProvider, metaCache, connectionManager::getConnection, connectionManager::close);
-  }
-
-  /**
-   * Closes this instance of DB. This includes:<br/>
-   * <ul>
-   *     <li>closing underlying connection(s) pool {@linkplain ConnectionManager#close()}</li>
-   *     <li>closing underlying executor service (if requested: {@linkplain DB.Builder#withTerminateExecutorServiceOnClose(boolean)})</li>
-   * </ul>
-   *
-   * @throws SQLRuntimeException if something went wrong
-   */
-  public void close() {
-	if (null != conveyor && terminateConveyorOnClose) {
-	  Optional.ofNullable(conveyor.get()).ifPresent(ExecutorService::shutdownNow);
-	}
-	if (terminateConnectionPoolOnClose) {
-	  try {
-		connectionManager.close();
-	  } catch (SQLException e) {
-		throw Utils.newSQLRuntimeException(e);
-	  }
-	}
-  }
-
-  /**
-   * A DB instance builder
-   */
-  @ParametersAreNonnullByDefault
   public static final class Builder {
+
+	private ExecutorService executorService = Executors.newWorkStealingPool();
+
+	private boolean terminateExecutorService;
 
 	private Supplier<String> txIdProvider = () -> UUID.randomUUID().toString();
 
-	private Supplier<ExecutorService> executorServiceSupplier = Executors::newWorkStealingPool;
-
-	private int maxConnections = Runtime.getRuntime().availableProcessors();
-
-	private boolean terminateExecutorServiceOnClose = false;
-
-	private boolean terminateConnectionPoolOnClose = true;
-
-	private ConnectionManager connectionManager;
-
-	private Builder() {
-	}
-
 	/**
-	 * Configures a {@linkplain DB} instance with transaction id provider function provided<br/>
-	 * Default generator uses {@linkplain UUID#randomUUID()} to provide a string representation of an id
+	 * Configures a {@linkplain DB} instance with executor service provided<br/>
+	 * Default is {@linkplain Executors#newWorkStealingPool()}
 	 *
-	 * @param txIdProvider transaction ID provider function
+	 * @param executorService an {@linkplain ExecutorService} instance
 	 * @return a {@linkplain Builder} instance
-	 * @throws NullPointerException if {@code txIdProvider} is null
+	 * @throws NullPointerException if {@code executorService} is null
 	 */
-	@Nonnull
-	public Builder withTransactionIdProvider(Supplier<String> txIdProvider) {
-	  this.txIdProvider = requireNonNull(txIdProvider, "Transaction ID provider function must be provided");
-	  return this;
-	}
-
-	/**
-	 * Configures a {@linkplain DB} instance with executor service provider function provided<br/>
-	 * Default provider is {@linkplain Executors#newWorkStealingPool()}
-	 *
-	 * @param executorServiceProvider an {@linkplain ExecutorService} provider function
-	 * @return a {@linkplain Builder} instance
-	 * @throws NullPointerException if {@code executorServiceProvider} is null
-	 */
-	@Nonnull
-	public Builder withExecutorServiceProvider(Supplier<ExecutorService> executorServiceProvider) {
-	  this.executorServiceSupplier = requireNonNull(executorServiceProvider, "Executor service must be provided");
+	public Builder withExecutorService(ExecutorService executorService) {
+	  this.executorService = requireNonNull(executorService);
 	  return this;
 	}
 
@@ -189,51 +66,25 @@ public final class DB extends Session {
 	 * Configures a {@linkplain DB} instance with executor service termination on close value provided<br/>
 	 * Default is {@code false}
 	 *
-	 * @param terminateExecutorServiceOnClose if {@code true} - then {@linkplain ExecutorService} will be attempted to shutdown on {@linkplain DB#close()} method invocation
+	 * @param terminateExecutorService if {@code true} - then {@linkplain ExecutorService} will be attempted to shut down on {@linkplain DB#close()} method invocation
 	 * @return a {@linkplain Builder} instance
 	 */
-	@Nonnull
-	public Builder withTerminateExecutorServiceOnClose(boolean terminateExecutorServiceOnClose) {
-	  this.terminateExecutorServiceOnClose = terminateExecutorServiceOnClose;
+	public Builder withTerminateExecutorServiceOnClose(boolean terminateExecutorService) {
+	  this.terminateExecutorService = terminateExecutorService;
 	  return this;
 	}
 
-	/**
-	 * Configures a {@linkplain DB} instance with connection pool termination on close value provided<br/>
-	 * Default is {@code true}
-	 *
-	 * @param terminateConnectionPoolOnClose if {@code true} - then underlying connection pool will be attempted to shut down on {@linkplain DB#close()} method invocation
-	 * @return a {@linkplain Builder} instance
-	 */
-	@Nonnull
-	public Builder withTerminateConnectionPoolOnClose(boolean terminateConnectionPoolOnClose) {
-	  this.terminateConnectionPoolOnClose = terminateConnectionPoolOnClose;
-	  return this;
-	}
 
 	/**
-	 * Configures a {@linkplain DB} instance with connection manager instance provided<br/>
+	 * Configures a {@linkplain DB} instance with transaction id provider function provided<br/>
+	 * Default generator uses {@linkplain UUID#randomUUID()} to provide a string representation of an id
 	 *
-	 * @param connectionManager a connection manager instance
-	 * @return a {@linkplain Builder} instance
-	 * @throws NullPointerException if {@code connectionManager} is null
+	 * @param txIdProvider transaction ID provider function
+	 * @throws NullPointerException if {@code txIdProvider} is null
+	 * @implNote provider function is responsible for control possible value uniqueness or other necessary things
 	 */
-	@Nonnull
-	public Builder withConnectionManager(ConnectionManager connectionManager) {
-	  this.connectionManager = requireNonNull(connectionManager, "Connection manager must be provided");
-	  return this;
-	}
-
-	/**
-	 * Configures a {@linkplain DB} instance with an upper limit of obtained (by this {@linkplain DB} instance) connections count<br/>
-	 * Default value is {@linkplain Runtime#availableProcessors()}
-	 *
-	 * @param count maximum connection to obtain (values less than {@code 1} are silently ignored)
-	 * @return a {@linkplain Builder} instance
-	 */
-	@Nonnull
-	public Builder withMaxConnections(int count) {
-	  this.maxConnections = max(1, count);
+	public Builder withTransactionIdProvider(Supplier<String> txIdProvider) {
+	  this.txIdProvider = requireNonNull(txIdProvider, "Transaction ID provider function must be provided");
 	  return this;
 	}
 
@@ -247,32 +98,115 @@ public final class DB extends Session {
 	 * DB db = DB.builder.build(() -> DriverManager.getConnection("jdbcURL"))
 	 * }</pre>
 	 *
-	 * @param connectionProvider a function that returns a connection to database
+	 * @param configurator a function that configures a connection to database
 	 * @return a new {@linkplain DB} instance. Never null
 	 * @throws NullPointerException if {@code connectionProvider} is null
 	 */
-	@Nonnull
-	public DB build(TrySupplier<Connection, SQLException> connectionProvider) {
-	  requireNonNull(connectionProvider, "Connection provider function must be provided");
+	public DB build(Consumer<DriverManagerDataSourceBuilder> configurator) {
+	  DriverManagerDataSourceBuilder ds = new DriverManagerDataSourceBuilder();
+	  requireNonNull(configurator).accept(ds);
 	  return new DB(
 			  new ConcurrentHashMap<>(),
-			  txIdProvider,
-			  null == connectionManager ? new DefaultConnectionManager(connectionProvider, maxConnections, Duration.ofSeconds(5)) : connectionManager,
-			  executorServiceSupplier,
-			  terminateExecutorServiceOnClose,
-			  terminateConnectionPoolOnClose
+			  () -> requireNonNull(txIdProvider.get(), "Transaction ID must not be null"),
+			  new DefaultConnectionManager(
+					  ds::getConnection,
+					  ds.getMaxConnections(),
+					  ds.getKeepAliveDuration(),
+					  ds.getKeepAliveQuery(),
+					  ds.getKeepAliveDuration()
+			  ),
+			  executorService,
+			  terminateExecutorService,
+			  true
 	  );
 	}
+
+  }
+
+
+  private final Supplier<String> txIdProvider;
+
+  private final ConnectionManager connectionManager;
+
+  private final ExecutorService conveyor;
+
+  private final boolean terminateExecutorServiceOnClose;
+
+  private final boolean terminateConnectionPoolOnClose;
+
+  DB(
+		  Map<String, MetadataImpl.Column> metaCache,
+		  Supplier<String> txIdProvider,
+		  ConnectionManager connectionManager,
+		  ExecutorService executorService,
+		  boolean terminateExecutorServiceOnClose,
+		  boolean terminateConnectionPoolOnClose) {
+	super(metaCache, connectionManager::getConnection, connectionManager::close, executorService);
+	this.txIdProvider = txIdProvider;
+	this.connectionManager = connectionManager;
+	this.terminateExecutorServiceOnClose = terminateExecutorServiceOnClose;
+	this.terminateConnectionPoolOnClose = terminateConnectionPoolOnClose;
+	this.conveyor = executorService;
+  }
+
+  public static Builder builder() {
+	return new Builder();
   }
 
   /**
-   * Creates a new builder instance
+   * Creates a transaction for the set of an arbitrary statements
+   * <br/>Example usage:
+   * <pre>{@code
+   *  // suppose we have to create a bunch of new users with provided names and get the latest one with all it's attributes filled in
+   *  DB db = // create DB instance
+   *  User latestUser = db.transaction().isolation(Transaction.Isolation.SERIALIZABLE).execute(session ->
+   *      session.update("INSERT INTO users(name) VALUES(?)", new Object[][]{{"name1"}, {"name2"}, {"name3"}})
+   *        .skipWarnings(false)
+   *        .timeout(1, TimeUnit.MINUTES)
+   *        .print() // prints to System.out
+   *        .execute(rs -> rs.getLong(1)) // returns a collection of generated ids
+   *        .stream()
+   *        .peek(id -> session.procedure("{call PROCESS_USER_CREATED_EVENT(?)}", id).call())
+   *        .max(Comparator.comparing(Function.identity()))
+   *        .flatMap(id -> session.select("SELECT * FROM users WHERE id=?", id)
+   *                              .print(LOG::debug)
+   *                              .single(rs -> new User(rs.getLong("id"), rs.getString("name")))
+   *        )
+   *        .map(user -> {
+   *          // fill other user attributes e.g.
+   *          session.select("SELECT * FROM USER_ATTR WHERE user_id = ?", user.getId())
+   *                 .execute(rs -> new UserAttr(rs.getLong("id"), rs.getString("name"), rs.getObject("value")))
+   *                 .forEach(user::addAttr);
+   *           return user;
+   *        })
+   *        .orElse(null)
+   * );
+   * }</pre>
    *
-   * @return a new {@code Builder} instance. Never null
+   * @return a transaction instance
    */
-  @Nonnull
-  public static Builder builder() {
-	return new Builder();
+  public Transaction transaction() {
+	return new JDBCTransaction(executorService, txIdProvider, metaCache, connectionManager::getConnection, connectionManager::close);
+  }
+
+  /**
+   * Closes this instance of DB. This includes:<br/>
+   * <ul>
+   *     <li>closing underlying connection(s) pool {@linkplain ConnectionManager#close()}</li>
+   *     <li>closing underlying executor service (if requested: {@linkplain DB.Builder#withTerminateExecutorServiceOnClose(boolean)})</li>
+   * </ul>
+   *
+   * @throws SQLRuntimeException if something went wrong
+   */
+  public void close() {
+	if (terminateConnectionPoolOnClose) {
+	  try {
+		connectionManager.close();
+	  } catch (SQLException e) {
+		throw newSQLRuntimeException(e);
+	  }
+	}
+	if (terminateExecutorServiceOnClose) conveyor.shutdownNow();
   }
 
   /**
@@ -288,9 +222,56 @@ public final class DB extends Session {
    * @return a new DB instance. Never null
    * @throws NullPointerException if {@code connectionProvider} is null
    */
-  @Nonnull
   public static DB create(TrySupplier<Connection, SQLException> connectionProvider) {
-	return DB.builder().build(connectionProvider);
+	return new DB(
+			new ConcurrentHashMap<>(),
+			() -> UUID.randomUUID().toString(),
+			new DefaultConnectionManager(
+					connectionProvider,
+					Runtime.getRuntime().availableProcessors(),
+					Duration.ofSeconds(10),
+					null,
+					Duration.ofSeconds(10)
+			),
+			Executors.newWorkStealingPool(),
+			true,
+			true
+	);
+  }
+
+  /**
+   * Builds a new <code>DB</code> instance with provided connection supplier function<br/>
+   * Example:
+   * <pre>{@code
+   * DataSource ds = // obtain datasource instance (via JNDI, DriverManager etc.)
+   * DB db = DB.builder().build(ds::getConnection);
+   * // or
+   * DB db = DB.builder.build(() -> DriverManager.getConnection("jdbcURL"))
+   * }</pre>
+   *
+   * @param dataSource a {@linkplain DataSource} that returns a connection to database
+   * @return a new {@linkplain DB} instance. Never null
+   * @throws NullPointerException if {@code connectionProvider} is null
+   */
+  public static DB create(DataSource dataSource) {
+	try {
+	  return new DB(
+			  new ConcurrentHashMap<>(),
+			  () -> format("%s@%s", UUID.randomUUID(), dataSource),
+			  new DefaultConnectionManager(
+					  dataSource::getConnection,
+					  Runtime.getRuntime().availableProcessors(),
+					  Duration.ofSeconds(dataSource.getLoginTimeout()),
+					  null,
+					  Duration.ofSeconds(dataSource.getLoginTimeout())
+			  ),
+			  Executors.newWorkStealingPool(),
+			  true,
+			  false
+	  );
+	} catch (SQLException e) {
+	  throw newSQLRuntimeException(e);
+	}
   }
 
 }

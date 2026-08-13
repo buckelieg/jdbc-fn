@@ -13,10 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.fn;
 
-import javax.annotation.Nonnull;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 /**
  * Represents a predicate (boolean-valued function) of one argument
@@ -45,7 +45,6 @@ public interface TryPredicate<I, E extends Throwable> {
    * @param <E> exception type
    * @return a type-checked {@linkplain #TRUE} constant
    */
-  @Nonnull
   @SuppressWarnings("unchecked")
   static <I, E extends Throwable> TryPredicate<I, E> TRUE() {
 	return (TryPredicate<I, E>) TRUE;
@@ -56,7 +55,6 @@ public interface TryPredicate<I, E extends Throwable> {
    * @param <E> exception type
    * @return a type-checked {@linkplain #FALSE} constant
    */
-  @Nonnull
   @SuppressWarnings("unchecked")
   static <I, E extends Throwable> TryPredicate<I, E> FALSE() {
 	return (TryPredicate<I, E>) FALSE;
@@ -124,6 +122,25 @@ public interface TryPredicate<I, E extends Throwable> {
   }
 
   /**
+   * Transforms this {@code TryPredicate} to {@linkplain Predicate} which tests the input value returning:<br/>
+   * <ul>
+   *   <li>a result of {@linkplain TryPredicate#test(Object)} method invocation</li>
+   *   <li>{@code false} whenever exception is thrown</li>
+   * </ul>
+   *
+   * @return a {@linkplain Predicate} instance
+   */
+  default Predicate<I> toPredicate() {
+	return value -> {
+	  try {
+		return test(value);
+	  } catch (Throwable e) {
+		return false;
+	  }
+	};
+  }
+
+  /**
    * Returns a predicate that tests if two arguments are equal according
    * to {@link Objects#equals(Object, Object)}.
    *
@@ -146,11 +163,10 @@ public interface TryPredicate<I, E extends Throwable> {
    * @param target predicate to negate
    * @return a predicate that negates the results of the supplied
    * predicate
-   * @throws E                    an arbitrary exception
-   * @throws NullPointerException if target is null
+   * @throws NullPointerException if {@code target} is null
    */
   @SuppressWarnings("unchecked")
-  static <I, E extends Throwable> TryPredicate<I, E> not(TryPredicate<? super I, E> target) throws E {
+  static <I, E extends Throwable> TryPredicate<I, E> not(TryPredicate<? super I, E> target) {
 	if (null == target) throw new NullPointerException("target Predicate must be provided");
 	return (TryPredicate<I, E>) target.negate();
   }

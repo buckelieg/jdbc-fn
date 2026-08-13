@@ -13,9 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
-
-import javax.annotation.Nonnull;
+package buckelieg.fn;
 
 import static java.util.Objects.requireNonNull;
 
@@ -41,7 +39,6 @@ public interface TryConsumer<I, E extends Throwable> {
    * @param <E> an exception type
    * @return a type-checked {@linkplain #NOOP} constant
    */
-  @Nonnull
   @SuppressWarnings("unchecked")
   static <I, E extends Throwable> TryConsumer<I, E> NOOP() {
 	return (TryConsumer<I, E>) NOOP;
@@ -59,6 +56,7 @@ public interface TryConsumer<I, E extends Throwable> {
    * Returns reference of lambda expression
    * <br/>Typical usage is:
    * <br/>{@code TryBiConsumer.of(x -> {}).andThen(x -> {});}
+   *
    * @param tryConsumer a consumer
    * @return {@link TryConsumer} reference
    * @throws NullPointerException if <code>tryConsumer</code> is null

@@ -15,9 +15,6 @@
  */
 package buckelieg.jdbc;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-import javax.annotation.ParametersAreNonnullByDefault;
 import java.sql.JDBCType;
 import java.sql.ParameterMetaData;
 import java.sql.SQLType;
@@ -33,7 +30,6 @@ import static java.util.Objects.requireNonNull;
  * @see StoredProcedure
  * @see java.sql.ParameterMetaData
  */
-@ParametersAreNonnullByDefault
 public final class P<T> {
 
   private final int mode;
@@ -44,7 +40,7 @@ public final class P<T> {
 
   private final SQLType type;
 
-  private P(int mode, SQLType type, String name, @Nullable T value) {
+  private P(int mode, SQLType type, String name, T value) {
 	this.mode = mode;
 	this.type = requireNonNull(type, "Parameter type must be provided");
 	this.name = requireNonNull(name, "Parameter name must be provided");
@@ -236,7 +232,6 @@ public final class P<T> {
    *
    * @return parameter name
    */
-  @Nonnull
   public String getName() {
 	return name;
   }
@@ -246,7 +241,6 @@ public final class P<T> {
    *
    * @return parameter value
    */
-  @Nullable
   public T value() {
 	return value;
   }
@@ -256,7 +250,6 @@ public final class P<T> {
    *
    * @return parameter type
    */
-  @Nullable
   public SQLType type() {
 	return type;
   }

@@ -15,18 +15,36 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryQuadConsumer;
-import buckelieg.jdbc.fn.TryTriConsumer;
+import buckelieg.fn.TryQuadConsumer;
+import buckelieg.fn.TrySupplier;
+import buckelieg.fn.TryTriConsumer;
 
-import javax.annotation.Nonnull;
 import javax.sql.RowSet;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.math.BigDecimal;
 import java.net.URL;
-import java.sql.*;
+import java.sql.Array;
+import java.sql.Blob;
+import java.sql.CallableStatement;
+import java.sql.Clob;
+import java.sql.Date;
+import java.sql.JDBCType;
+import java.sql.NClob;
+import java.sql.PreparedStatement;
+import java.sql.Ref;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.RowId;
+import java.sql.SQLException;
+import java.sql.SQLFeatureNotSupportedException;
+import java.sql.SQLType;
+import java.sql.SQLXML;
+import java.sql.Time;
+import java.sql.Timestamp;
 import java.util.Calendar;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static java.util.Objects.requireNonNull;
 
@@ -37,39 +55,57 @@ final class ValueSetters implements ValueWriter {
   private final PreparedStatement preparedStatement;
   private final CallableStatement callableStatement;
 
-  private final Metadata metadata;
+  private final TrySupplier<ResultSetMetaData, SQLException> metadataSupplier;
 
-  private ValueSetters(Metadata metadata, ResultSet resultSet, PreparedStatement preparedStatement) {
-	this.metadata = metadata;
+  private final AtomicReference<ResultSetMetaData> meta = new AtomicReference<>();
+
+  private ValueSetters(ResultSet resultSet, PreparedStatement preparedStatement) {
 	if (resultSet instanceof RowSet) {
 	  this.rowSet = (RowSet) resultSet;
 	  this.resultSet = null;
 	  this.preparedStatement = null;
 	  this.callableStatement = null;
+	  this.metadataSupplier = this.rowSet::getMetaData;
 	} else if (resultSet instanceof ResultSet) {
 	  this.resultSet = resultSet;
 	  this.rowSet = null;
 	  this.preparedStatement = null;
 	  this.callableStatement = null;
+	  this.metadataSupplier = this.resultSet::getMetaData;
 	} else if (preparedStatement instanceof CallableStatement) {
 	  this.callableStatement = (CallableStatement) preparedStatement;
 	  this.preparedStatement = null;
 	  this.resultSet = null;
 	  this.rowSet = null;
+	  this.metadataSupplier = this.callableStatement::getMetaData;
 	} else {
 	  this.preparedStatement = preparedStatement;
 	  this.callableStatement = null;
 	  this.resultSet = null;
 	  this.rowSet = null;
+	  this.metadataSupplier = this.preparedStatement::getMetaData;
 	}
   }
 
-  static <T extends ResultSet> ValueWriter writer(Metadata metadata, T resultSet) {
-	return new ValueSetters(metadata, requireNonNull(resultSet, "ResultSet instance must be provided"), null);
+  static <T extends ResultSet> ValueWriter writer(T resultSet) {
+	return new ValueSetters(requireNonNull(resultSet, "ResultSet instance must be provided"), null);
   }
 
-  static <T extends PreparedStatement> ValueWriter writer(Metadata metadata, T statement) {
-	return new ValueSetters(metadata, null, requireNonNull(statement, "Statement instance must be provided"));
+  static <T extends PreparedStatement> ValueWriter writer(T statement) {
+	return new ValueSetters(null, requireNonNull(statement, "Statement instance must be provided"));
+  }
+
+  private ResultSetMetaData meta() {
+	return meta.updateAndGet(meta -> {
+	  if (null == meta) {
+		try {
+		  meta = metadataSupplier.get();
+		} catch (SQLException e) {
+		  throw new SQLRuntimeException(e);
+		}
+	  }
+	  return meta;
+	});
   }
 
   @SuppressWarnings("unchecked")
@@ -80,9 +116,7 @@ final class ValueSetters implements ValueWriter {
 		  TryTriConsumer<R, Integer, T, SQLException> rowSetSetter
   ) throws SQLException {
 	if (null != preparedStatement) statementSetter.accept((S) preparedStatement, index, value);
-	else if (null != callableStatement)
-	  ((TryTriConsumer<CallableStatement, Integer, T, SQLException>) statementSetter)
-			  .accept(callableStatement, index, value);
+	else if (null != callableStatement) ((TryTriConsumer<CallableStatement, Integer, T, SQLException>) statementSetter).accept(callableStatement, index, value);
 	else if (null != resultSet) resultSetSetter.accept(resultSet, index, value);
 	else if (null != rowSet) rowSetSetter.accept((R) rowSet, index, value);
   }
@@ -101,7 +135,10 @@ final class ValueSetters implements ValueWriter {
   }
 
   private int indexOf(String name) throws SQLException {
-	return metadata.indexOf(name);
+	ResultSetMetaData meta = meta();
+	for (int index = 0; index < meta.getColumnCount(); index++)
+	  if (name.equalsIgnoreCase(meta.getColumnName(index))) return index;
+	return -1;
   }
 
   @SuppressWarnings("unchecked")
@@ -113,8 +150,7 @@ final class ValueSetters implements ValueWriter {
   ) throws SQLException {
 	if (null != preparedStatement) statementSetter.accept((S) preparedStatement, index, value1, value2);
 	else if (null != callableStatement)
-	  ((TryQuadConsumer<CallableStatement, Integer, T, N, SQLException>) statementSetter)
-			  .accept(callableStatement, index, value1, value2);
+	  ((TryQuadConsumer<CallableStatement, Integer, T, N, SQLException>) statementSetter).accept(callableStatement, index, value1, value2);
 	else if (null != resultSet) resultSetSetter.accept(resultSet, index, value1, value2);
 	else if (null != rowSet) rowSetSetter.accept(rowSet, index, value1, value2);
   }
@@ -127,22 +163,13 @@ final class ValueSetters implements ValueWriter {
 		  TryQuadConsumer<RowSet, String, T, N, SQLException> rowSetSetter
   ) throws SQLException {
 	if (null != preparedStatement) {
-	  ResultSetMetaData meta = preparedStatement.getMetaData();
-	  for (int index = 1; index <= meta.getColumnCount(); index++) {
-		if (name.equalsIgnoreCase(meta.getColumnName(index))) {
-		  preparedStatementSetter.accept(preparedStatement, index, value1, value2);
-		  return;
-		}
-	  }
+	  int index = indexOf(name);
+	  if (-1 != index) {
+		preparedStatementSetter.accept(preparedStatement, index, value1, value2);
+	  } else throw new SQLException(Utils.EXCEPTION_MESSAGE);
 	} else if (null != callableStatement) callableStatementSetter.accept(callableStatement, name, value1, value2);
 	else if (null != resultSet) resultSetSetter.accept(resultSet, name, value1, value2);
 	else if (null != rowSet) rowSetSetter.accept(rowSet, name, value1, value2);
-  }
-
-  @Nonnull
-  @Override
-  public Metadata meta() {
-	return metadata;
   }
 
   @Override

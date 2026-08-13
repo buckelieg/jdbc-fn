@@ -15,10 +15,8 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryFunction;
+import buckelieg.fn.TryFunction;
 
-import javax.annotation.Nonnull;
-import javax.annotation.ParametersAreNonnullByDefault;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -30,7 +28,6 @@ import java.util.List;
  * <br/>If this is a batch query then affected rows are summed
  */
 @SuppressWarnings("unchecked")
-@ParametersAreNonnullByDefault
 public interface Update extends Query<Update> {
 
   /**
@@ -39,7 +36,6 @@ public interface Update extends Query<Update> {
    *
    * @return affected rows count
    */
-  @Nonnull
   Long execute();
 
   /**
@@ -55,7 +51,6 @@ public interface Update extends Query<Update> {
    * @throws NullPointerException if generatedValuesHandler or valueMapper is null
    * @see java.sql.Connection#prepareStatement(String, int)
    */
-  @Nonnull
   <T> List<T> execute(TryFunction<ValueReader, T, SQLException> generatedValuesMapper);
 
   /**
@@ -73,7 +68,6 @@ public interface Update extends Query<Update> {
    * @throws IllegalArgumentException if colNames is empty
    * @see java.sql.Connection#prepareStatement(String, String[])
    */
-  @Nonnull
   <T> List<T> execute(TryFunction<ValueReader, T, SQLException> generatedValuesMapper, String... colNames);
 
   /**
@@ -91,7 +85,6 @@ public interface Update extends Query<Update> {
    * @throws IllegalArgumentException if colIndices is empty
    * @see java.sql.Connection#prepareStatement(String, int[])
    */
-  @Nonnull
   <T> List<T> execute(TryFunction<ValueReader, T, SQLException> generatedValuesMapper, int... colIndices);
 
   /**
@@ -106,7 +99,7 @@ public interface Update extends Query<Update> {
    * Tells DB to use batch (if possible)
    * <br/>Value of <code>1</code> denotes that no batching is used
    * <br/>Default value of <code>batchSize</code> is <code>1</code>
-   * <br/>Value less than <code>1</code> are silently ignored
+   * <br/>Values less than <code>1</code> are silently ignored
    *
    * @param batchSize the size of batch to use (must be greater or equal to 1)
    * @return update query abstraction

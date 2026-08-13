@@ -15,31 +15,37 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryConsumer;
-import buckelieg.jdbc.fn.TrySupplier;
+import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TrySupplier;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-import javax.annotation.ParametersAreNonnullByDefault;
-import javax.annotation.concurrent.NotThreadSafe;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.SQLWarning;
+import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.StreamSupport;
 
-import static buckelieg.jdbc.Utils.*;
+import static buckelieg.jdbc.Utils.STATEMENT_DELIMITER;
+import static buckelieg.jdbc.Utils.isAnonymous;
+import static buckelieg.jdbc.Utils.isProcedure;
+import static buckelieg.jdbc.Utils.newSQLRuntimeException;
+import static buckelieg.jdbc.Utils.prepareQuery;
+import static buckelieg.jdbc.Utils.setStatementParameters;
 import static java.lang.Math.max;
 import static java.lang.System.currentTimeMillis;
 import static java.util.Collections.emptyList;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
 
-@NotThreadSafe
-@ParametersAreNonnullByDefault
 final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
 
   private static final Consumer<? super Throwable> NOOP = e -> {};
@@ -50,7 +56,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
 
   private final TryConsumer<Connection, ? extends Throwable> connectionConsumer;
 
-  private final Supplier<ExecutorService> executorServiceSupplier;
+  private final ExecutorService executorService;
 
   private final List<T> params;
   private final AtomicReference<String> query = new AtomicReference<>();
@@ -73,12 +79,12 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
   ScriptQuery(
 		  TrySupplier<Connection, SQLException> connectionSupplier,
 		  TryConsumer<Connection, ? extends Throwable> connectionConsumer,
-		  Supplier<ExecutorService> executorServiceSupplier,
+		  ExecutorService executorService,
 		  String script,
-		  @Nullable Iterable<T> namedParams) {
+		  Iterable<T> namedParams) {
 	this.connectionSupplier = connectionSupplier;
 	this.connectionConsumer = connectionConsumer;
-	this.executorServiceSupplier = executorServiceSupplier;
+	this.executorService = executorService;
 	this.script = script;
 	this.params = namedParams == null ? emptyList() : StreamSupport.stream(namedParams.spliterator(), false).collect(toList());
   }
@@ -90,7 +96,6 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
    * @return a time, taken by this script to complete in milliseconds
    * @throws SQLRuntimeException in case of any errors including {@link SQLWarning} (if corresponding option is set) OR (if timeout is set) - in case of execution run out of time.
    */
-  @Nonnull
   @Override
   public Long execute() {
 	TrySupplier<Long, SQLException> execute = () -> {
@@ -101,7 +106,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
 	try {
 	  if (timeout == 0) return execute.get();
 	  else {
-		task = executorServiceSupplier.get().submit(execute::get);
+		task = executorService.submit(execute::get);
 		return task.get(timeout, unit);
 	  }
 	} catch (SQLException e) {
@@ -161,14 +166,12 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
 	return currentTimeMillis() - start;
   }
 
-  @Nonnull
   @Override
   public Script escaped(boolean escapeProcessing) {
 	this.escaped = escapeProcessing;
 	return this;
   }
 
-  @Nonnull
   @Override
   public Script print(Consumer<String> printer) {
 	if (null == printer) throw new NullPointerException("Printer must be provided");
@@ -176,21 +179,18 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
 	return this;
   }
 
-  @Nonnull
   @Override
   public Script skipErrors(boolean skipErrors) {
 	this.skipErrors = skipErrors;
 	return this;
   }
 
-  @Nonnull
   @Override
   public Script skipWarnings(boolean skipWarnings) {
 	this.skipWarnings = skipWarnings;
 	return this;
   }
 
-  @Nonnull
   @Override
   public Script timeout(int timeout, TimeUnit unit) {
 	this.unit = requireNonNull(unit, "Time Unit must be provided");
@@ -203,21 +203,18 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
 	return script;
   }
 
-  @Nonnull
   @Override
   public Script poolable(boolean poolable) {
 	this.poolable = poolable;
 	return this;
   }
 
-  @Nonnull
   @Override
   public Script verbose(Consumer<String> logger) {
 	this.logger = requireNonNull(logger, "Logger must be provided");
 	return this;
   }
 
-  @Nonnull
   @Override
   public String asSQL() {
 	return query.updateAndGet(sql -> {

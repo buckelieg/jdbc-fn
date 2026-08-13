@@ -15,8 +15,8 @@
  */
 package buckelieg.jdbc;
 
-import javax.annotation.Nonnull;
 import java.io.PrintStream;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -39,7 +39,6 @@ public interface Query<Q extends Query<Q>> {
    * @see StoredProcedure#execute()
    * @see Script#execute()
    */
-  @Nonnull
   <T> T execute();
 
   /**
@@ -49,7 +48,6 @@ public interface Query<Q extends Query<Q>> {
    * @return a query abstraction
    * @see java.sql.Statement#setPoolable(boolean)
    */
-  @Nonnull
   Q poolable(boolean poolable);
 
   /**
@@ -60,7 +58,6 @@ public interface Query<Q extends Query<Q>> {
    * @return a query abstraction
    * @see java.sql.Statement#setQueryTimeout(int)
    */
-  @Nonnull
   default Q timeout(int timeout) {
 	return timeout(timeout, TimeUnit.SECONDS);
   }
@@ -77,8 +74,18 @@ public interface Query<Q extends Query<Q>> {
    * @see #timeout(int)
    * @see TimeUnit
    */
-  @Nonnull
   Q timeout(int timeout, TimeUnit unit);
+
+  /**
+   * Sets query execution timeout
+   *
+   * @param duration a duration of timeout (will be converted to seconds)
+   * @return a query abstraction
+   */
+  default Q timeout(Duration duration) {
+	if (null == duration) throw new NullPointerException("Duration must be provided");
+	return timeout((int) duration.getSeconds());
+  }
 
   /**
    * Sets escape processing for this query
@@ -87,7 +94,6 @@ public interface Query<Q extends Query<Q>> {
    * @return a query abstraction
    * @see java.sql.Statement#setEscapeProcessing(boolean)
    */
-  @Nonnull
   Q escaped(boolean escapeProcessing);
 
 
@@ -98,7 +104,6 @@ public interface Query<Q extends Query<Q>> {
    * @return a query abstraction
    * @implNote default value is <code>true</code>
    */
-  @Nonnull
   Q skipWarnings(boolean skipWarnings);
 
   /**
@@ -109,7 +114,6 @@ public interface Query<Q extends Query<Q>> {
    * @return a query abstraction
    * @throws NullPointerException if <code>printer</code> is null
    */
-  @Nonnull
   Q print(Consumer<String> printer);
 
   /**
@@ -120,7 +124,6 @@ public interface Query<Q extends Query<Q>> {
    * @see System#out
    * @see PrintStream#println
    */
-  @Nonnull
   default Q print() {
 	return print(System.out::println);
   }
@@ -131,7 +134,6 @@ public interface Query<Q extends Query<Q>> {
    *
    * @return this query as a SQL string
    */
-  @Nonnull
   String asSQL();
 
 }

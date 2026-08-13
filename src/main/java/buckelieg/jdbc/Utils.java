@@ -15,22 +15,31 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryFunction;
-import buckelieg.jdbc.fn.TryQuadFunction;
+import buckelieg.fn.TryFunction;
+import buckelieg.fn.TryQuadFunction;
 
-import javax.annotation.Nonnull;
 import java.lang.reflect.Method;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.*;
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Optional;
+import java.util.PrimitiveIterator;
+import java.util.Spliterators;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.BaseStream;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import static java.lang.String.format;
 import static java.lang.reflect.Proxy.newProxyInstance;
@@ -68,7 +77,6 @@ enum Utils {
 		  Pattern.CASE_INSENSITIVE
   );
 
-  @Nonnull
   static Entry<String, Object[]> prepareQuery(String query, Iterable<? extends Entry<String, ?>> namedParams) {
 	Map<Integer, Object> indicesToValues = new TreeMap<>();
 	Map<String, Optional<?>> transformedParams = stream(namedParams.spliterator(), false).collect(toMap(
@@ -80,17 +88,15 @@ enum Utils {
 	while (matcher.find())
 	  for (Object o : asIterable(transformedParams.getOrDefault(matcher.group(), empty())))
 		indicesToValues.put(++idx, o);
-	for (Entry<String, Optional<?>> e : transformedParams.entrySet()) {
+	for (Entry<String, Optional<?>> e : transformedParams.entrySet())
 	  query = query.replaceAll(
 			  format("(%s\\b)%s", e.getKey(), QUOTATION_ESCAPE),
 			  stream(asIterable(e.getValue()).spliterator(), false).map(o -> "?").collect(joining(","))
 	  );
-	}
 	return entry(checkAnonymous(query), indicesToValues.values().toArray());
   }
 
   @SuppressWarnings({"rawtypes", "unchecked", "OptionalUsedAsFieldOrParameterType"})
-  @Nonnull
   private static Iterable<?> asIterable(Optional o) {
 	Iterable<?> iterable;
 	Object value = o.orElse(singletonList(null));
@@ -116,6 +122,10 @@ enum Utils {
 	return !NAMED_PARAMETER.matcher(query).find();
   }
 
+  static boolean isSingle(String query) {
+	return !STATEMENT_DELIMITER_PATTERN.matcher(wipeComments(query)).find();
+  }
+
   static SQLRuntimeException newSQLRuntimeException(Throwable... throwables) {
 	StringBuilder messages = new StringBuilder();
 	for (Throwable throwable : throwables) {
@@ -127,10 +137,10 @@ enum Utils {
 			  .map(msg -> msg.append(" "))
 			  .orElse(new StringBuilder());
 	  AtomicReference<String> prevMsg = new AtomicReference<>();
-	  while ((t = t.map(Throwable::getCause)).orElse(null) != null) {
+	  while ((t = t.map(Throwable::getCause)).isPresent()) {
 		t.map(Throwable::getMessage)
 				.map(msg -> format("%s ", msg.trim()))
-				.filter(msg -> prevMsg.get() != null && prevMsg.get().equals(msg))
+				.filter(msg -> prevMsg.get() != null && msg.equals(prevMsg.get()))
 				.ifPresent(message::append);
 		prevMsg.set(t.map(Throwable::getMessage).map(String::trim).orElse(null));
 	  }
@@ -249,17 +259,15 @@ enum Utils {
   }
 
   static String checkSingle(String query) {
-	query = wipeComments(query);
-	if (STATEMENT_DELIMITER_PATTERN.matcher(query).find())
-	  throw new IllegalArgumentException(format("Query '%s' is not a single one", query));
+	if (!isSingle(query)) throw new IllegalArgumentException(format("Query '%s' is not a single one", query));
 	return query;
   }
 
   static <S extends PreparedStatement> S setStatementParameters(S statement, Object... params) throws SQLException {
 	int pNum = 0;
+	ValueWriter writer = ValueSetters.writer(statement);
 	for (Object p : params) {
-//            Mappers.setParameter(statement, ++pNum, p);
-	  statement.setObject(++pNum, p);
+	  JDBCDefaults.setObject(writer, ++pNum, p);
 	}
 	return statement;
   }
@@ -272,7 +280,7 @@ enum Utils {
 	  Object p = params[idx];
 	  replaced = replaced.replaceFirst(
 			  "\\?",
-			  (p != null && p.getClass().isArray() ? of((Object[]) p) : of(ofNullable(p).orElse("null")))
+			  (null != p && p.getClass().isArray() ? of((Object[]) p) : of(ofNullable(p).orElse("null")))
 					  .map(value -> value instanceof String ? format("'%s'", value.toString().replaceAll("\\$", "")) : value.toString())
 					  .collect(joining(","))
 	  );
@@ -281,7 +289,6 @@ enum Utils {
 	return replaced;
   }
 
-  @Nonnull
   static <T> List<T> listResultSet(ResultSet resultSet, TryFunction<ResultSet, T, SQLException> mapper) throws SQLException {
 	List<T> result = new ArrayList<>();
 	while (resultSet.next())
@@ -289,19 +296,37 @@ enum Utils {
 	return result;
   }
 
-  @Nonnull
+  @SuppressWarnings("unchecked")
+  static <T> Stream<T> streamResultSet(ResultSet rs, TryFunction<ResultSet, T, SQLException> mapper) {
+	return (Stream<T>) proxy(StreamSupport.stream(Spliterators.spliteratorUnknownSize(new Iterator<T>() {
+
+	  @Override
+	  public boolean hasNext() {
+		try {
+		  return rs.isAfterLast();
+		} catch (SQLException e) {
+		  throw new RuntimeException(e);
+		}
+	  }
+
+	  @Override
+	  public T next() {
+		try {
+		  rs.next();
+		  return mapper.apply(rs);
+		} catch (SQLException e) {
+		  throw new RuntimeException(e);
+		}
+	  }
+	}, 0), false).onClose(() -> {}));
+  }
+
   static <K, V> Map.Entry<K, V> entry(K key, V value) {
 	return new AbstractMap.SimpleImmutableEntry<>(key, value);
   }
 
-  @SuppressWarnings("unchecked")
-  @Nonnull
-  static <T> T proxy(T instance, List<Class<?>> into, TryQuadFunction<T, Object, Method, Object[], Object, Exception> handler) {
-	return (T) newProxyInstance(
-			requireNonNull(instance, "Instance must be provided").getClass().getClassLoader(),
-			requireNonNull(into, "Interface class must be provided").toArray(new Class[0]),
-			(proxy, method, args) -> handler.apply(instance, proxy, method, args)
-	);
+  static Object proxy(Object instance, List<Class<?>> into, TryQuadFunction<Object, Object, Method, Object[], Object, Exception> handler) {
+	return newProxyInstance(instance.getClass().getClassLoader(), into.toArray(new Class[0]), (proxy, method, args) -> handler.apply(instance, proxy, method, args));
   }
 
   static Object proxy(Object stream) {
@@ -329,7 +354,7 @@ enum Utils {
   static List<Class<?>> getAllInterfaces(Class<?> cls) {
 	Class<?> parent = cls;
 	List<Class<?>> interfaces = new ArrayList<>();
-	while (parent != null) {
+	while (null != parent) {
 	  interfaces.addAll(asList(parent.getInterfaces()));
 	  parent = parent.getSuperclass();
 	}
@@ -337,8 +362,7 @@ enum Utils {
   }
 
   static PrimitiveIterator.OfInt newIntSequence() {
-	AtomicInteger cursor = new AtomicInteger();
-	return IntStream.generate(() -> cursor.getAndAdd(1)).iterator();
+	return IntStream.generate(new AtomicInteger()::getAndIncrement).iterator();
   }
 
 }

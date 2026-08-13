@@ -13,9 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package buckelieg.jdbc.fn;
+package buckelieg.fn;
 
-import javax.annotation.Nonnull;
 import java.util.Objects;
 
 /**
@@ -48,7 +47,6 @@ public interface TryQuadConsumer<I1, I2, I3, I4, E extends Throwable> {
    * @param <E>  exception type
    * @return a type-checked {@linkplain #NOOP} constant
    */
-  @Nonnull
   @SuppressWarnings("unchecked")
   static <I1, I2, I3, I4, E extends Throwable> TryQuadConsumer<I1, I2, I3, I4, E> NOOP() {
 	return (TryQuadConsumer<I1, I2, I3, I4, E>) NOOP;

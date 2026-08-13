@@ -15,7 +15,7 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryBiFunction;
+import buckelieg.fn.TryBiFunction;
 
 import java.sql.SQLException;
 import java.util.Spliterator;
@@ -46,7 +46,7 @@ final class SequentialSpliterator<T> implements Spliterator<T> {
 		selectQuery.resultSet = selectQuery.doExecute(selectQuery.statement);
 		selectQuery.currentResultSetNumber.incrementAndGet();
 		if (selectQuery.resultSet != null) {
-		  selectQuery.meta = new RSMeta(selectQuery.getConnection()::getMetaData, selectQuery.resultSet::getMetaData, selectQuery.metaCache);
+		  selectQuery.meta = new MetadataImpl(selectQuery.getConnection()::getMetaData, selectQuery.resultSet::getMetaData, selectQuery.metaCache);
 		  selectQuery.wrapper = ValueGetters.reader(selectQuery.meta, selectQuery.resultSet);
 		} else {
 		  selectQuery.finisher.run();
@@ -57,7 +57,7 @@ final class SequentialSpliterator<T> implements Spliterator<T> {
 	  if (selectQuery.resultSet.next()) next = mapper.apply(selectQuery.wrapper, selectQuery.currentResultSetNumber.get());
 	  else if (selectQuery.statement.getMoreResults()) {
 		selectQuery.resultSet = selectQuery.statement.getResultSet();
-		selectQuery.meta = new RSMeta(selectQuery.getConnection()::getMetaData, selectQuery.resultSet::getMetaData, selectQuery.metaCache);
+		selectQuery.meta = new MetadataImpl(selectQuery.getConnection()::getMetaData, selectQuery.resultSet::getMetaData, selectQuery.metaCache);
 		selectQuery.currentResultSetNumber.incrementAndGet();
 		selectQuery.wrapper = ValueGetters.reader(selectQuery.meta, selectQuery.resultSet);
 		if (selectQuery.resultSet.next()) next = mapper.apply(selectQuery.wrapper, selectQuery.currentResultSetNumber.get());

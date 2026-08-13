@@ -15,25 +15,64 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.jdbc.fn.TryBiFunction;
-import buckelieg.jdbc.fn.TryFunction;
-import buckelieg.jdbc.fn.TryTriConsumer;
+import buckelieg.fn.TryBiFunction;
+import buckelieg.fn.TryFunction;
+import buckelieg.fn.TryTriConsumer;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.Reader;
 import java.math.BigDecimal;
+import java.sql.Array;
+import java.sql.Blob;
+import java.sql.Clob;
 import java.sql.Date;
-import java.sql.*;
+import java.sql.NClob;
+import java.sql.SQLException;
+import java.sql.SQLType;
+import java.sql.Time;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.ZonedDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static buckelieg.jdbc.Utils.entry;
 import static java.lang.Math.max;
-import static java.sql.JDBCType.*;
+import static java.sql.JDBCType.ARRAY;
+import static java.sql.JDBCType.BIGINT;
+import static java.sql.JDBCType.BINARY;
+import static java.sql.JDBCType.BIT;
+import static java.sql.JDBCType.BLOB;
+import static java.sql.JDBCType.CHAR;
+import static java.sql.JDBCType.CLOB;
+import static java.sql.JDBCType.DATE;
+import static java.sql.JDBCType.DECIMAL;
+import static java.sql.JDBCType.DOUBLE;
+import static java.sql.JDBCType.FLOAT;
+import static java.sql.JDBCType.INTEGER;
+import static java.sql.JDBCType.JAVA_OBJECT;
+import static java.sql.JDBCType.LONGNVARCHAR;
+import static java.sql.JDBCType.LONGVARBINARY;
+import static java.sql.JDBCType.LONGVARCHAR;
+import static java.sql.JDBCType.NCLOB;
+import static java.sql.JDBCType.NUMERIC;
+import static java.sql.JDBCType.OTHER;
+import static java.sql.JDBCType.REAL;
+import static java.sql.JDBCType.SMALLINT;
+import static java.sql.JDBCType.TIME;
+import static java.sql.JDBCType.TIMESTAMP;
+import static java.sql.JDBCType.TIMESTAMP_WITH_TIMEZONE;
+import static java.sql.JDBCType.TIME_WITH_TIMEZONE;
+import static java.sql.JDBCType.TINYINT;
+import static java.sql.JDBCType.VARBINARY;
+import static java.sql.JDBCType.VARCHAR;
 import static java.util.stream.Collectors.joining;
 
 enum JDBCDefaults {
@@ -53,9 +92,8 @@ enum JDBCDefaults {
   static Map<String, Object> defaultMapper(ValueReader reader) throws SQLException {
 	Metadata meta = reader.meta();
 	Map<String, Object> result = new HashMap<>(meta.columnCount());
-	for(int index = 1; index <= meta.columnCount(); index++) {
+	for (int index = 1; index <= meta.columnCount(); index++)
 	  result.put(meta.getName(index), reader(meta.getSQLType(index)).apply(reader, index));
-	}
 	return result;
   }
 
@@ -184,7 +222,7 @@ enum JDBCDefaults {
 	};
   }
 
-  private static void setObject(ValueWriter writer, int index, Object value) throws SQLException {
+  static void setObject(ValueWriter writer, int index, Object value) throws SQLException {
 	if (null == value) writer.setObject(index, null);
 	else {
 	  Class<?> cls = value.getClass();
@@ -210,6 +248,7 @@ enum JDBCDefaults {
 	  else if (double.class.isAssignableFrom(cls)) writer.setDouble(index, (double) value);
 	  else if (Double.class.isAssignableFrom(cls)) writer.setDouble(index, (Double) value);
 	  else if (boolean.class.isAssignableFrom(cls)) writer.setBoolean(index, (boolean) value);
+	  else if (Boolean.class.isAssignableFrom(cls)) writer.setBoolean(index, (Boolean) value);
 	  else if (BigDecimal.class.isAssignableFrom(cls)) writer.setBigDecimal(index, (BigDecimal) value);
 	  else writer.setObject(index, value);
 	}
