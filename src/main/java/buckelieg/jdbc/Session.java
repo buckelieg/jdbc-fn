@@ -15,7 +15,7 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TryBiConsumer;
 import buckelieg.fn.TrySupplier;
 
 import java.io.File;
@@ -54,18 +54,32 @@ import static java.util.stream.Stream.of;
 public class Session {
 
   final TrySupplier<Connection, SQLException> connectionSupplier;
+  final TrySupplier<Connection, SQLException> processingConnectionSupplier;
   final Map<String, MetadataImpl.Column> metaCache;
-  final TryConsumer<Connection, ? extends Throwable> connectionCloser;
+  final TryBiConsumer<Connection, Boolean, ? extends Throwable> connectionCloser;
+  final TryBiConsumer<Connection, Boolean, ? extends Throwable> processingConnectionCloser;
   final ExecutorService executorService;
 
   Session(
 		  Map<String, MetadataImpl.Column> metaCache,
 		  TrySupplier<Connection, SQLException> connectionSupplier,
-		  TryConsumer<Connection, ? super Throwable> connectionCloser,
+		  TryBiConsumer<Connection, Boolean, ? extends Throwable> connectionCloser,
+		  ExecutorService executorService) {
+	this(metaCache, connectionSupplier, connectionCloser, connectionSupplier, connectionCloser, executorService);
+  }
+
+  Session(
+		  Map<String, MetadataImpl.Column> metaCache,
+		  TrySupplier<Connection, SQLException> connectionSupplier,
+		  TryBiConsumer<Connection, Boolean, ? extends Throwable> connectionCloser,
+		  TrySupplier<Connection, SQLException> processingConnectionSupplier,
+		  TryBiConsumer<Connection, Boolean, ? extends Throwable> processingConnectionCloser,
 		  ExecutorService executorService) {
 	this.connectionSupplier = connectionSupplier;
 	this.metaCache = metaCache;
 	this.connectionCloser = connectionCloser;
+	this.processingConnectionSupplier = processingConnectionSupplier;
+	this.processingConnectionCloser = processingConnectionCloser;
 	this.executorService = executorService;
   }
 
@@ -186,7 +200,16 @@ public class Session {
 		));
 	  }
 	}
-	return new StoredProcedureQuery(metaCache, connectionSupplier, connectionCloser, executorService, query, parameters);
+	return new StoredProcedureQuery(
+			metaCache,
+			connectionSupplier,
+			connectionCloser,
+			processingConnectionSupplier,
+			processingConnectionCloser,
+			executorService,
+			query,
+			parameters
+	);
   }
 
   /**
@@ -201,7 +224,16 @@ public class Session {
   public Select select(String query, Object... parameters) {
 	requireNonNull(query, "SQL query must be provided");
 	if (isProcedure(query)) throw new IllegalArgumentException(format("Query '%s' is not valid select statement", query));
-	return new SelectQuery(metaCache, connectionSupplier, connectionCloser, executorService, checkAnonymous(checkSingle(query)), parameters);
+	return new SelectQuery(
+			metaCache,
+			connectionSupplier,
+			connectionCloser,
+			processingConnectionSupplier,
+			processingConnectionCloser,
+			executorService,
+			checkAnonymous(checkSingle(query)),
+			parameters
+	);
   }
 
   /**

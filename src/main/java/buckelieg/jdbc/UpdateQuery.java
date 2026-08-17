@@ -15,7 +15,7 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TryBiConsumer;
 import buckelieg.fn.TryFunction;
 import buckelieg.fn.TrySupplier;
 
@@ -54,7 +54,7 @@ final class UpdateQuery extends AbstractQuery<Update, Statement> implements Upda
 
   UpdateQuery(
 		  TrySupplier<Connection, SQLException> connectionSupplier,
-		  TryConsumer<Connection, ? extends Throwable> connectionConsumer,
+		  TryBiConsumer<Connection, Boolean, ? extends Throwable> connectionConsumer,
 		  ExecutorService executorService,
 		  String query, Object[]... batch) {
 	super(connectionSupplier, connectionConsumer, executorService, query, (Object) batch);
@@ -78,9 +78,11 @@ final class UpdateQuery extends AbstractQuery<Update, Statement> implements Upda
 	if (null == generatedValuesMapper) throw new NullPointerException("Generated values mapper must be provided");
 	try {
 	  prepareStatement(true);
-	  return (DEFAULT_BATCH_SIZE != batchSize && getConnection().getMetaData().supportsBatchUpdates())
+	  List<T> result = (DEFAULT_BATCH_SIZE != batchSize && getConnection().getMetaData().supportsBatchUpdates())
 			  ? executeUpdateBatchWithGeneratedKeys(generatedValuesMapper)
 			  : executeUpdateWithGeneratedKeys(generatedValuesMapper);
+	  markSuccessful();
+	  return result;
 	} catch (SQLException e) {
 	  throw newSQLRuntimeException(e);
 	} finally {
@@ -105,7 +107,9 @@ final class UpdateQuery extends AbstractQuery<Update, Statement> implements Upda
   public Long execute() {
 	try {
 	  prepareStatement(false);
-	  return (DEFAULT_BATCH_SIZE != batchSize && getConnection().getMetaData().supportsBatchUpdates()) ? executeUpdateBatch() : executeUpdate();
+	  Long result = (DEFAULT_BATCH_SIZE != batchSize && getConnection().getMetaData().supportsBatchUpdates()) ? executeUpdateBatch() : executeUpdate();
+	  markSuccessful();
+	  return result;
 	} catch (SQLException e) {
 	  throw newSQLRuntimeException(e);
 	} finally {

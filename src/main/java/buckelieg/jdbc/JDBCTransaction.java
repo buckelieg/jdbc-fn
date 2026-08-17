@@ -16,6 +16,7 @@
 package buckelieg.jdbc;
 
 import buckelieg.fn.TryBiFunction;
+import buckelieg.fn.TryBiConsumer;
 import buckelieg.fn.TryConsumer;
 import buckelieg.fn.TrySupplier;
 
@@ -56,6 +57,8 @@ final class JDBCTransaction implements Transaction {
 
   private final TryConsumer<Connection, SQLException> connectionCloser;
 
+  private final TryBiConsumer<Connection, Boolean, ? extends Throwable> processingConnectionCloser;
+
   private final PrimitiveIterator.OfInt sequence = newIntSequence();
 
   JDBCTransaction(
@@ -63,11 +66,13 @@ final class JDBCTransaction implements Transaction {
 		  Supplier<String> txIdProvider,
 		  Map<String, MetadataImpl.Column> metaCache,
 		  TrySupplier<Connection, SQLException> connectionProvider,
-		  TryConsumer<Connection, SQLException> connectionCloser) {
+		  TryConsumer<Connection, SQLException> connectionCloser,
+		  TryBiConsumer<Connection, Boolean, ? extends Throwable> processingConnectionCloser) {
 	this.executorService = executorService;
 	this.txIdProvider = txIdProvider;
 	this.connectionProvider = connectionProvider;
 	this.connectionCloser = connectionCloser;
+	this.processingConnectionCloser = processingConnectionCloser;
 	this.metaCache = metaCache;
   }
 
@@ -140,7 +145,14 @@ final class JDBCTransaction implements Transaction {
 		  throw new SQLException(format("Unsupported transaction isolation level: '%s'", isolation.name()));
 		connection.setTransactionIsolation(isolation.level);
 	  }
-	  result = action.apply(new Session(metaCache, () -> connection, TryConsumer.NOOP(), executorService), transactionContext);
+	  result = action.apply(new Session(
+			  metaCache,
+			  () -> connection,
+			  TryBiConsumer.NOOP(),
+			  connectionProvider,
+			  processingConnectionCloser,
+			  executorService
+	  ), transactionContext);
 	  if (null != beforeCommitHandler && !beforeCommitHandler.test(transactionContext)) {
 		connection.rollback(savepoint);
 		connection.releaseSavepoint(savepoint);

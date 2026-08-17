@@ -26,11 +26,16 @@ Add maven dependency:
 There are a couple of ways to set up the things:
 ```java
 DataSource ds = ... // obtain ds (e.g. via JNDI or other way)
-DB db = DB.create(ds::getConnection); // shortcut for DB.builder().build(ds::getConnection)
+DB db = DB.create(ds); // shortcut for DB.builder().build(ds)
 // or
 DB db = DB.builder()
-          .withMaxConnections(10) // defaults to Runtime.getRuntime().availableProcessors()
-          .build(() -> DriverManager.getConnection("vendor-specific-string"));
+          .withMaxConnections(10) // jdbc-fn limit; also available with build(ds)
+          .build(driverManager -> driverManager
+              .build("jdbc:vendor-specific-string"));
+// or, when connection creation is already encapsulated
+DB db = DB.builder()
+          .withMaxConnections(10)
+          .build(() -> DriverManager.getConnection("jdbc:vendor-specific-string"));
 // do things...
 db.close(); // cleaning used resources: closes underlying connection pool, executor service (if configured to do so) etc...
 ```
@@ -77,7 +82,7 @@ For cases where it is needed to issue any additional queries to database use:
 ```java
 // suppose the USERS table contains thousands of records
 Stream<User> users = db.select("SELECT * FROM USERS")
-    .fetchSize(2000) // 2000 rows per one roundtrip to DB...
+    .fetchSize(2000) // preferred fetch window; the driver strategy may use its own streaming signal
     .forBatch(rs -> new User(rs.getLong("id"), rs.getString("name")))
     .size(1000) // ...split by batch sized of 1000 items
     .execute((batchOfUsers, session) -> {
@@ -98,9 +103,25 @@ Stream<User> users = db.select("SELECT * FROM USERS")
 // stream of users objects will consist of updated (enriched) objects
 ```
 Using this to process batches you must keep some things in mind:
-+ Executor service is used internally to power parallel processing</li>
-+ All batches are processed regardless any possible short circuits</li>
-+ <code>Select.fetchSize</code> and <code>Select.ForBatch.size</code> are not the same but connected</li>
++ Rows are fetched sequentially, while materialized batches are processed concurrently and emitted in source order.</li>
++ Calling <code>Stream.unordered()</code> emits processed batches in completion order; <code>Stream.parallel()</code> alone retains source order.</li>
++ Processing concurrency defaults to the number of available processors and can be overridden with <code>Select.ForBatch.concurrency(int)</code>.</li>
++ A short-circuiting terminal operation cancels queued batches and waits for already running processors.</li>
++ A supplied <code>Session</code> lazily obtains a connection separate from the source cursor and completes one transaction per batch.</li>
++ A callback which executes SQL needs up to one pool connection per concurrent batch in addition to the source cursor connection.</li>
++ Independent batch transactions may commit in a different order from the source rows.</li>
++ The supplied <code>Session</code> must not be retained or used asynchronously after the batch callback returns.</li>
++ <code>Select.fetchSize</code> and <code>Select.ForBatch.size</code> are not the same but connected.</li>
+
+SELECT streams require a verified bounded-memory JDBC strategy by default. PostgreSQL, MySQL Connector/J,
+Oracle, Microsoft SQL Server and Apache Derby are configured automatically. For an unknown driver the
+query fails before execution; standard JDBC fetch-size hints can be requested explicitly:
+```java
+db.select("SELECT * FROM VENDOR_TABLE")
+    .streaming(Select.Streaming.PREFERRED)
+    .execute();
+```
+Use <code>Select.Streaming.BUFFERED</code> only when full driver-side result buffering is acceptable.
 
 ##### Metadata processing
 For the special cases when only a metadata of the query is needed `Select.forMeta` can be used:
@@ -112,6 +133,10 @@ Map<String, Boolean> processedMeta = db.select("SELECT * FROM TEST").forMeta(met
   return map;
 });
 ```
+Result and schema metadata are loaded before the first row mapper or batch processor is invoked. If a
+driver cannot describe a prepared SELECT before execution, jdbc-fn performs a one-row metadata probe,
+closes that probe result, fills the metadata cache and then opens the real streaming cursor. Such a
+fallback can execute a SELECT twice, so SELECT statements should be repeatable and free of side effects.
 
 ### Insert 
 with question marks:
@@ -275,4 +300,3 @@ Java8, Maven, Appropriate JDBC driver.
 
 ## License
 This project licensed under Apache License, Version 2.0 - see the [LICENSE.md](LICENSE.md) file for details
-

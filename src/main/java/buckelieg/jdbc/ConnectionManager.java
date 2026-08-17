@@ -40,6 +40,15 @@ interface ConnectionManager extends AutoCloseable {
   void close(Connection connection) throws SQLException;
 
   /**
+   * Returns a connection after completing a standalone operation.
+   *
+   * @param connection           a connection to return
+   * @param transactionSucceeded whether the operation completed successfully
+   * @throws SQLException in case of any error
+   */
+  void close(Connection connection, boolean transactionSucceeded) throws SQLException;
+
+  /**
    * Shuts down all possessed connections and clears all necessary resources
    *
    * @throws SQLException in case of any errors

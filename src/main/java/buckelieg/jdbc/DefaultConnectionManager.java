@@ -36,10 +36,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static java.lang.String.format;
 
 final class DefaultConnectionManager implements ConnectionManager {
+
+  private static final long POOL_WAIT_TIMEOUT_MILLIS = 100L;
 
   private final TrySupplier<Connection, SQLException> connectionSupplier;
 
@@ -88,66 +89,184 @@ final class DefaultConnectionManager implements ConnectionManager {
 
   @Override
   public Connection getConnection() throws SQLException {
-	if (isShuttingDown.get()) throw new SQLException("Connection pool is shutting down");
-	Connection connection;
-	try {
-	  if (size.get() < maxConnections) {
-		size.incrementAndGet();
-		connection = connectionSupplier.get();
-		if (null == connection) throw new NullPointerException("Provided connection is null");
-		if (obtainedConnections.containsKey(connection)) connection = pool.take();
-		else obtainedConnections.put(connection, ConnectionMetadata.of(connection));
-	  } else connection = pool.take();
-	  if (connection.isClosed()) {
-		close(connection);
-		connection = getConnection();
+	while (true) {
+	  Connection connection;
+	  try {
+		connection = acquireConnection();
+	  } catch (InterruptedException e) {
+		Thread.currentThread().interrupt();
+		throw new SQLException(e);
 	  }
-	  if (obtainedConnections.get(connection).isBusy.get() && pool.offer(connection)) connection = getConnection();
-	} catch (InterruptedException e) {
-	  Thread.currentThread().interrupt();
-	  throw new SQLException(e);
+	  if (isShuttingDown.get()) {
+		discard(connection);
+		throw new SQLException("Connection pool is shutting down");
+	  }
+
+	  try {
+		if (connection.isClosed()) {
+		  discard(connection);
+		  continue;
+		}
+
+		ConnectionMetadata metadata = obtainedConnections.get(connection);
+		if (null == metadata) {
+		  discard(connection);
+		  continue;
+		}
+		if (!metadata.isBusy.compareAndSet(false, true)) {
+		  if (!pool.offer(connection)) throw new SQLException("Connection pool is full");
+		  continue;
+		}
+
+		connection.setAutoCommit(false);
+		activeSessions.incrementAndGet();
+		metadata.lastTimeUsed.set(System.currentTimeMillis());
+		return connection;
+	  } catch (SQLException e) {
+		discardAfterFailure(connection, e);
+		throw e;
+	  } catch (RuntimeException e) {
+		discardAfterFailure(connection, e);
+		throw e;
+	  }
 	}
-	connection.setAutoCommit(false);
-	activeSessions.incrementAndGet();
-	ConnectionMetadata metadata = obtainedConnections.get(connection);
-	metadata.lastTimeUsed.set(System.currentTimeMillis());
-	metadata.isBusy.compareAndSet(false, true);
-	return connection;
+  }
+
+  private Connection acquireConnection() throws SQLException, InterruptedException {
+	while (!isShuttingDown.get()) {
+	  Connection connection = pool.poll();
+	  if (null != connection) return connection;
+
+	  if (reserveConnectionSlot()) {
+		connection = createConnection();
+		if (null != connection) return connection;
+
+		// A supplier may return a connection which is already leased by this
+		// manager. Wait for it to become idle instead of repeatedly invoking
+		// the supplier in a tight loop.
+		connection = pool.poll(POOL_WAIT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
+		if (null != connection) return connection;
+		continue;
+	  }
+
+	  connection = pool.poll(POOL_WAIT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
+	  if (null != connection) return connection;
+	}
+	throw new SQLException("Connection pool is shutting down");
+  }
+
+  private boolean reserveConnectionSlot() {
+	int current;
+	do {
+	  current = size.get();
+	  if (current >= maxConnections) return false;
+	} while (!size.compareAndSet(current, current + 1));
+	return true;
+  }
+
+  private Connection createConnection() throws SQLException {
+	Connection connection = null;
+	boolean registered = false;
+	try {
+	  connection = connectionSupplier.get();
+	  if (null == connection) throw new SQLException("Provided connection is null");
+
+	  ConnectionMetadata metadata = ConnectionMetadata.of(connection);
+	  if (null != obtainedConnections.putIfAbsent(connection, metadata)) return null;
+	  registered = true;
+	  return connection;
+	} catch (Throwable failure) {
+	  if (null != connection && !registered) {
+		try {
+		  connection.close();
+		} catch (SQLException | RuntimeException closeFailure) {
+		  failure.addSuppressed(closeFailure);
+		}
+	  }
+	  if (failure instanceof SQLException) throw (SQLException) failure;
+	  if (failure instanceof Error) throw (Error) failure;
+	  throw new SQLException(failure);
+	} finally {
+	  if (!registered) size.decrementAndGet();
+	}
+  }
+
+  private void discard(Connection connection) throws SQLException {
+	if (null != connection) pool.remove(connection);
+	if (null != connection && null != obtainedConnections.remove(connection)) size.decrementAndGet();
+	if (null != connection) connection.close();
+  }
+
+  private void discardAfterFailure(Connection connection, Throwable failure) {
+	try {
+	  discard(connection);
+	} catch (SQLException | RuntimeException closeFailure) {
+	  failure.addSuppressed(closeFailure);
+	}
   }
 
   @Override
   public void close(Connection connection) throws SQLException {
+	release(connection, null);
+  }
+
+  @Override
+  public void close(Connection connection, boolean transactionSucceeded) throws SQLException {
+	release(connection, transactionSucceeded);
+  }
+
+  private void release(Connection connection, Boolean transactionSucceeded) throws SQLException {
 	if (null == connection) return;
-	if (connection.isClosed()) {
-	  obtainedConnections.remove(connection);
-	  size.decrementAndGet();
-	} else {
-	  activeSessions.decrementAndGet();
-	  if (isShuttingDown.get()) {
-		mutex.updateAndGet(latch -> {
-		  if (null != latch) latch.countDown();
-		  return latch;
-		});
-		connection.close();
+	ConnectionMetadata metadata = obtainedConnections.get(connection);
+	boolean leaseReleased = false;
+	try {
+	  if (null == metadata || connection.isClosed()) {
+		discard(connection);
 		return;
 	  }
-	  ConnectionMetadata metadata = obtainedConnections.get(connection);
-	  connection.setAutoCommit(true);
+
+	  // A null outcome means that the caller (an explicit transaction) has
+	  // already made its commit/rollback decision. Roll back defensively so
+	  // returning a connection can never commit unfinished work implicitly.
+	  if (Boolean.TRUE.equals(transactionSucceeded)) connection.commit();
+	  else connection.rollback();
+
+	  if (isShuttingDown.get()) {
+		discard(connection);
+		return;
+	  }
+
 	  connection.clearWarnings();
 	  connection.setHoldability(metadata.holdability);
 	  connection.setReadOnly(metadata.readOnly);
 	  connection.setTransactionIsolation(metadata.isolationLevel);
-	  if (pool.offer(connection)) {
-		metadata.lastTimeUsed.set(System.currentTimeMillis());
-		metadata.isBusy.compareAndSet(true, false);
-	  } else throw new SQLException("Connection pool is full");
+	  connection.setAutoCommit(metadata.autoCommit);
+
+	  leaseReleased = metadata.isBusy.compareAndSet(true, false);
+	  if (!leaseReleased) throw new SQLException("Connection is not leased");
+	  if (!pool.offer(connection)) throw new SQLException("Connection pool is full");
+	  metadata.lastTimeUsed.set(System.currentTimeMillis());
+	} catch (SQLException e) {
+	  discardAfterFailure(connection, e);
+	  throw e;
+	} catch (RuntimeException e) {
+	  discardAfterFailure(connection, e);
+	  throw e;
+	} finally {
+	  if (null != metadata && (leaseReleased || metadata.isBusy.compareAndSet(true, false))) {
+		activeSessions.decrementAndGet();
+		mutex.updateAndGet(latch -> {
+		  if (null != latch) latch.countDown();
+		  return latch;
+		});
+	  }
 	}
   }
 
   @Override
   public void close() throws SQLException {
-	if (null != keepAlive) keepAlive.cancel(true);
 	isShuttingDown.set(true);
+	if (null != keepAlive) keepAlive.cancel(true);
 	SQLException exception = null;
 	if (null != waitOnClose && activeSessions.get() > 0) { // gracefully closing pool waiting for configured time for existing transactions to complete
 	  mutex.updateAndGet(mutex -> null == mutex ? new CountDownLatch(activeSessions.get()) : mutex);
@@ -163,30 +282,49 @@ final class DefaultConnectionManager implements ConnectionManager {
 	  }
 	}
 	obtainedConnections.clear();
+	executorService.shutdownNow();
 	if (null != exception) throw exception;
   }
 
   private void executeQuery(String query) {
-	if (isShuttingDown.get()) return;
-	long now = System.currentTimeMillis();
-	obtainedConnections.entrySet().stream()
-			.filter(entry -> (now - entry.getValue().lastTimeUsed.get()) > TimeUnit.SECONDS.toMillis(5))
-			.filter(entry -> !entry.getValue().isBusy.get())
-			.forEach(entry -> {
-			  entry.getValue().isBusy.compareAndSet(false, true);
-			  Connection connection = entry.getKey();
-			  ConnectionMetadata metadata = entry.getValue();
-			  try (Statement statement = connection.createStatement()) {
-				connection.setAutoCommit(false);
-				statement.execute(query);
-				connection.rollback();
-				connection.setAutoCommit(true);
-				metadata.lastTimeUsed.set(now);
-				metadata.isBusy.compareAndSet(true, false);
-			  } catch (SQLException e) {
-				throw newSQLRuntimeException(e);
-			  }
-			});
+	int connectionsToCheck = pool.size();
+	for (int i = 0; i < connectionsToCheck && !isShuttingDown.get(); i++) {
+	  Connection connection = pool.poll();
+	  if (null == connection) return;
+
+	  ConnectionMetadata metadata = obtainedConnections.get(connection);
+	  boolean claimed = false;
+	  boolean healthy = true;
+	  try {
+		if (null == metadata || connection.isClosed()) {
+		  healthy = false;
+		  continue;
+		}
+		if ((System.currentTimeMillis() - metadata.lastTimeUsed.get()) <= TimeUnit.SECONDS.toMillis(5)) continue;
+		if (!metadata.isBusy.compareAndSet(false, true)) continue;
+		claimed = true;
+
+		try (Statement statement = connection.createStatement()) {
+		  statement.execute(query);
+		  metadata.lastTimeUsed.set(System.currentTimeMillis());
+		}
+	  } catch (SQLException | RuntimeException e) {
+		healthy = false;
+	  } finally {
+		if (claimed) metadata.isBusy.compareAndSet(true, false);
+		if (healthy && !isShuttingDown.get()) {
+		  if (!pool.offer(connection)) discardQuietly(connection);
+		} else discardQuietly(connection);
+	  }
+	}
+  }
+
+  private void discardQuietly(Connection connection) {
+	try {
+	  discard(connection);
+	} catch (SQLException | RuntimeException ignored) {
+	  // A failed liveness check must not stop future scheduled checks.
+	}
   }
 
   private boolean waitFor() {

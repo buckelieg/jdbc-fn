@@ -42,22 +42,17 @@ final class SequentialSpliterator<T> implements Spliterator<T> {
 	T next = null;
 	try {
 	  if (!isInitialized.getAndSet(true)) {
-		selectQuery.statement = selectQuery.prepareStatement();
-		selectQuery.resultSet = selectQuery.doExecute(selectQuery.statement);
-		selectQuery.currentResultSetNumber.incrementAndGet();
-		if (selectQuery.resultSet != null) {
-		  selectQuery.meta = new MetadataImpl(selectQuery.getConnection()::getMetaData, selectQuery.resultSet::getMetaData, selectQuery.metaCache);
-		  selectQuery.wrapper = ValueGetters.reader(selectQuery.meta, selectQuery.resultSet);
-		} else {
-		  selectQuery.finisher.run();
-		  selectQuery.close();
-		  return false;
+		if (!selectQuery.initializeResultSet()) {
+			  selectQuery.finisher.run();
+			  selectQuery.markSuccessful();
+			  selectQuery.close();
+			  return false;
 		}
 	  }
 	  if (selectQuery.resultSet.next()) next = mapper.apply(selectQuery.wrapper, selectQuery.currentResultSetNumber.get());
 	  else if (selectQuery.statement.getMoreResults()) {
 		selectQuery.resultSet = selectQuery.statement.getResultSet();
-		selectQuery.meta = new MetadataImpl(selectQuery.getConnection()::getMetaData, selectQuery.resultSet::getMetaData, selectQuery.metaCache);
+		selectQuery.meta = new MetadataImpl(null, selectQuery.resultSet::getMetaData, selectQuery.metaCache).snapshot();
 		selectQuery.currentResultSetNumber.incrementAndGet();
 		selectQuery.wrapper = ValueGetters.reader(selectQuery.meta, selectQuery.resultSet);
 		if (selectQuery.resultSet.next()) next = mapper.apply(selectQuery.wrapper, selectQuery.currentResultSetNumber.get());

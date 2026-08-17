@@ -15,60 +15,46 @@
  */
 package buckelieg.jdbc;
 
+import buckelieg.fn.TryBiConsumer;
 import buckelieg.fn.TryBiFunction;
-import buckelieg.fn.TryConsumer;
 import buckelieg.fn.TryTriConsumer;
 
+import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Deque;
 import java.util.List;
-import java.util.Map;
 import java.util.Spliterator;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import static buckelieg.jdbc.Utils.entry;
 import static buckelieg.jdbc.Utils.newSQLRuntimeException;
+import static java.lang.Math.max;
 import static java.sql.JDBCType.BLOB;
 import static java.sql.JDBCType.CLOB;
 import static java.sql.JDBCType.LONGNVARCHAR;
 import static java.sql.JDBCType.LONGVARBINARY;
 import static java.sql.JDBCType.LONGVARCHAR;
 import static java.sql.JDBCType.NCLOB;
-import static java.util.Collections.emptyList;
+import static java.util.Objects.requireNonNull;
 
-// TODO implement using CompletableFuture?
 final class BatchSpliterator<T> implements Spliterator<T> {
 
-  private ExecutorService executorService;
+  private final AtomicBoolean initialized = new AtomicBoolean();
 
-  private BlockingQueue<Map.Entry<List<T>, Integer>> processedBatchesQueue;
+  private final AtomicBoolean closing = new AtomicBoolean();
 
-  private final AtomicBoolean isInitialized = new AtomicBoolean();
+  private final AtomicBoolean finished = new AtomicBoolean();
 
-  private final AtomicReference<Throwable> exception = new AtomicReference<>();
-
-  private final AtomicReference<Boolean> initializationResult = new AtomicReference<>();
-
-  private final AtomicInteger batchIndex = new AtomicInteger();
-
-  private final AtomicInteger batchCount = new AtomicInteger(-1);
-
-  private Session session;
-
-  private final AtomicBoolean executionStarted = new AtomicBoolean();
-
-  private final AtomicBoolean cancellationRequested = new AtomicBoolean();
-
-  private final List<Future<?>> submittedTasks = new ArrayList<>();
-
-  private final AtomicBoolean isClosing = new AtomicBoolean();
+  private final AtomicBoolean ordered = new AtomicBoolean(true);
 
   private final TryBiFunction<ValueReader, Integer, T, SQLException> mapper;
 
@@ -76,17 +62,47 @@ final class BatchSpliterator<T> implements Spliterator<T> {
 
   private final SelectQuery selectQuery;
 
+  private final Deque<BatchTask<T>> inFlight = new ArrayDeque<>();
+
+  private final BlockingQueue<BatchTask<T>> completed = new LinkedBlockingQueue<>();
+
+  private final AtomicReference<Throwable> processingFailure = new AtomicReference<>();
+
+  private List<T> currentBatch = Collections.emptyList();
+
+  private int currentItem;
+
+  private int batchIndex;
+
   private int size;
+
+  private int concurrency;
+
+  private boolean exhausted;
+
+  private boolean sourceExhausted;
+
+  private boolean executed;
 
   BatchSpliterator(
 		  SelectQuery selectQuery,
 		  TryBiFunction<ValueReader, Integer, T, SQLException> mapper,
 		  TryTriConsumer<List<T>, Session, Integer, ? extends Exception> batchProcessor,
-		  int size) {
+		  int size,
+		  int concurrency) {
 	this.selectQuery = selectQuery;
 	this.mapper = mapper;
 	this.batchProcessor = batchProcessor;
 	this.size = size;
+	this.concurrency = max(1, concurrency);
+  }
+
+  static int defaultConcurrency() {
+	return max(1, Runtime.getRuntime().availableProcessors());
+  }
+
+  void unordered() {
+	ordered.set(false);
   }
 
   @Override
@@ -106,124 +122,223 @@ final class BatchSpliterator<T> implements Spliterator<T> {
 
   @Override
   public int characteristics() {
-	return IMMUTABLE;
+	return IMMUTABLE | (ordered.get() ? ORDERED : 0);
   }
 
   @Override
   public boolean tryAdvance(Consumer<? super T> action) {
-	if (!init()) return false;
-	if (batchCount.get() > 0) {
-	  List<T> items = next();
-	  if (null == items) return false;
-	  for (T item : items) action.accept(item);
+	requireNonNull(action, "Action must be provided");
+	if (closing.get() || exhausted) return false;
+	try {
+	  if (!initialize()) return false;
+
+	  while (currentItem >= currentBatch.size()) {
+		if (!fetchAndProcessNextBatch()) {
+		  exhausted = true;
+		  return false;
+		}
+	  }
+
+	  action.accept(currentBatch.get(currentItem++));
 	  return true;
-	} else return false;
+	} catch (Throwable failure) {
+	  selectQuery.markFailed();
+	  if (failure instanceof Error) throw (Error) failure;
+	  throw newSQLRuntimeException(failure);
+	}
   }
 
-  private List<T> next() {
+  private boolean initialize() throws Exception {
+	if (initialized.get()) return null != selectQuery.resultSet;
+	if (!initialized.compareAndSet(false, true)) return null != selectQuery.resultSet;
+
+	boolean initialized = selectQuery.initializeResultSet();
+	executed = true;
+	if (!initialized) return false;
+	if (selectQuery.meta.containsAny(LONGVARBINARY, LONGNVARCHAR, LONGVARCHAR, BLOB, CLOB, NCLOB)) {
+	  size = 1;
+	  concurrency = 1;
+	}
+	return true;
+  }
+
+  private boolean fetchAndProcessNextBatch() throws Throwable {
+	fillPipeline();
+	if (inFlight.isEmpty()) return false;
+
+	BatchTask<T> next;
+	if (ordered.get()) next = inFlight.removeFirst();
+	else {
+	  try {
+		next = completed.take();
+	  } catch (InterruptedException e) {
+		Thread.currentThread().interrupt();
+		throw e;
+	  }
+	  inFlight.remove(next);
+	}
+	await(next.future);
+	currentBatch = next.batch;
+	currentItem = 0;
+	return true;
+  }
+
+  private void fillPipeline() throws SQLException {
+	while (!sourceExhausted && inFlight.size() < concurrency) {
+	  List<T> batch = readNextBatch();
+	  if (batch.isEmpty()) return;
+	  submit(batch, ++batchIndex);
+	}
+  }
+
+  private List<T> readNextBatch() throws SQLException {
+	List<T> batch = new ArrayList<>(size);
+	while (batch.size() < size) {
+	  if (!selectQuery.resultSet.next()) {
+		sourceExhausted = true;
+		break;
+	  }
+	  batch.add(mapper.apply(selectQuery.wrapper, selectQuery.currentResultSetNumber.get()));
+	}
+	return batch;
+  }
+
+  private void submit(List<T> batch, int index) {
+	BatchTask<T> task = new BatchTask<>(batch);
+	task.future = selectQuery.executorService.submit(() -> {
+	  try {
+		if (closing.get()) return;
+		process(batch, index);
+	  } catch (Throwable failure) {
+		processingFailure.compareAndSet(null, failure);
+		if (failure instanceof Error) throw (Error) failure;
+		if (failure instanceof RuntimeException) throw (RuntimeException) failure;
+		throw new BatchProcessingException(failure);
+	  } finally {
+		if (!ordered.get()) completed.offer(task);
+	  }
+	});
+	inFlight.addLast(task);
+  }
+
+  private void await(Future<?> future) throws Throwable {
 	try {
-	  return (0 == batchCount.getAndDecrement() ? Utils.<List<T>, Integer>entry(emptyList(), 0) : processedBatchesQueue.take()).getKey();
+	  future.get();
 	} catch (InterruptedException e) {
 	  Thread.currentThread().interrupt();
-	  handleException(e);
-	  return null;
+	  throw e;
+	} catch (ExecutionException e) {
+	  Throwable failure = e.getCause();
+	  if (failure instanceof BatchProcessingException && null != failure.getCause()) failure = failure.getCause();
+	  throw failure;
+	}
+  }
+
+  private void process(List<T> batch, int index) throws Throwable {
+	AtomicReference<Connection> processingConnection = new AtomicReference<>();
+	Session processingSession = new Session(
+			selectQuery.metaCache,
+			() -> {
+			  Connection connection = processingConnection.get();
+			  if (null == connection) {
+				connection = selectQuery.processingConnectionSupplier.get();
+				processingConnection.set(connection);
+			  }
+			  return connection;
+			},
+			TryBiConsumer.NOOP(),
+			selectQuery.processingConnectionSupplier,
+			selectQuery.processingConnectionCloser,
+			selectQuery.executorService
+	);
+
+	boolean successful = false;
+	Throwable failure = null;
+	try {
+	  batchProcessor.accept(batch, processingSession, index);
+	  successful = true;
+	} catch (Throwable e) {
+	  failure = e;
+	  throw e;
+	} finally {
+	  Connection connection = processingConnection.getAndSet(null);
+	  if (null != connection) {
+		try {
+		  selectQuery.processingConnectionCloser.accept(connection, successful);
+		} catch (Throwable closeFailure) {
+		  if (null != failure) failure.addSuppressed(closeFailure);
+		  else throw closeFailure;
+		}
+	  }
 	}
   }
 
   void close() {
-	if (!isClosing.getAndSet(true)) {
-	  cancellationRequested.compareAndSet(false, true);
-	  // gracefully closing query:
-	  // here we have to drain all data from all tasks which pending or running at the moment and might use a session (connection)
-	  do {
-		next(); // TODO are there any chances to short circuit these out?
-	  } while (!submittedTasks.stream().allMatch(Future::isDone));
-	  selectQuery.finisher.run();
+	if (!closing.compareAndSet(false, true)) return;
+	try {
+	  awaitOutstanding();
+	  finish();
+	} catch (Throwable failure) {
+	  selectQuery.markFailed();
+	  if (failure instanceof Error) throw (Error) failure;
+	  throw newSQLRuntimeException(failure);
+	} finally {
 	  selectQuery.close();
-	  if (null != exception.get())
-		throw newSQLRuntimeException(exception.get());
 	}
   }
 
-  private boolean init() {
-	Boolean result = initializationResult.get();
-	if (null != result) return result;
-	if (!isInitialized.getAndSet(true)) {
-	  try {
-		selectQuery.statement = selectQuery.prepareStatement();
-		selectQuery.resultSet = selectQuery.doExecute(selectQuery.statement);
-		if (selectQuery.resultSet != null) {
-		  selectQuery.meta = new MetadataImpl(selectQuery.getConnection()::getMetaData, selectQuery.resultSet::getMetaData, selectQuery.metaCache);
-		  session = new Session(selectQuery.metaCache, selectQuery::getConnection, TryConsumer.NOOP(), selectQuery.executorService);
-		  selectQuery.wrapper = ValueGetters.reader(selectQuery.meta, selectQuery.resultSet);
-		  size = selectQuery.meta.containsAny(LONGVARBINARY, LONGNVARCHAR, LONGVARCHAR, BLOB, CLOB, NCLOB) ? 1 : size;
-		  processedBatchesQueue = new ArrayBlockingQueue<>(size);
-		  executorService = selectQuery.executorService;
-		} else {
-		  selectQuery.finisher.run();
-		  initializationResult.set(false);
-		  return false;
-		}
-	  } catch (SQLException e) {
-		exception.compareAndSet(null, e);
-		initializationResult.set(false);
-		return false;
-	  }
-	  executorService.execute(() -> {
+  private void awaitOutstanding() throws Throwable {
+	Throwable firstFailure = null;
+	boolean interrupted = false;
+	for (BatchTask<T> task : inFlight) {
+	  boolean complete = false;
+	  while (!complete) {
 		try {
-		  int index = 0;
-		  List<T> batch = new ArrayList<>(size);
-		  while (selectQuery.resultSet.next() && !cancellationRequested.get()) {
-			if (0 != index && 0 == index % size && !cancellationRequested.get()) {
-			  index = 0;
-			  dispatch(new ArrayList<>(batch), batchIndex.incrementAndGet());
-			  batch = new ArrayList<>(size);
-			}
-			batch.add(mapper.apply(selectQuery.wrapper, selectQuery.currentResultSetNumber.get()));
-			index++;
-		  }
-		  if (!batch.isEmpty() && !cancellationRequested.get()) {
-			dispatch(new ArrayList<>(batch), batchIndex.incrementAndGet());
-		  }
-		  batchCount.compareAndSet(-1, batchIndex.get());
-		  executionStarted.compareAndSet(false, true);
-		} catch (SQLException e) {
-		  handleException(e);
+		  await(task.future);
+		  complete = true;
+		} catch (InterruptedException failure) {
+		  interrupted = true;
+		  Thread.interrupted();
+		  if (null == firstFailure) firstFailure = failure;
+		} catch (CancellationException ignored) {
+		  // The executor cancelled the task before it obtained a processing connection.
+		  complete = true;
+		} catch (Throwable failure) {
+		  if (null == firstFailure) firstFailure = failure;
+		  else if (firstFailure != failure) firstFailure.addSuppressed(failure);
+		  complete = true;
 		}
-	  });
-	}
-	do {
-	  if (cancellationRequested.get()) {
-		initializationResult.set(false);
-		return false;
 	  }
-	} while (!executionStarted.get());
-	initializationResult.set(true);
-	return true;
+	}
+	inFlight.clear();
+	if (interrupted) Thread.currentThread().interrupt();
+	Throwable asynchronousFailure = processingFailure.get();
+	if (null == firstFailure) firstFailure = asynchronousFailure;
+	else if (null != asynchronousFailure && firstFailure != asynchronousFailure) {
+	  firstFailure.addSuppressed(asynchronousFailure);
+	}
+	if (null != firstFailure) throw firstFailure;
   }
 
-  private void dispatch(List<T> batch, int index) {
-	if (!cancellationRequested.get()) {
-	  submittedTasks.add(executorService.submit(() -> {
-		try {
-		  if (cancellationRequested.get()) processedBatchesQueue.put(entry(emptyList(), index));
-		  else {
-			batchProcessor.accept(batch, session, index);
-			processedBatchesQueue.put(entry(batch, index));
-		  }
-		} catch (InterruptedException e) {
-		  Thread.currentThread().interrupt();
-		  handleException(e);
-		} catch (Exception e) {
-		  handleException(e);
-		}
-	  }));
+  private void finish() {
+	if (executed && finished.compareAndSet(false, true)) selectQuery.finisher.run();
+  }
+
+  private static final class BatchTask<T> {
+
+	private final List<T> batch;
+	private Future<?> future;
+
+	private BatchTask(List<T> batch) {
+	  this.batch = batch;
 	}
   }
 
-  private void handleException(Exception e) {
-	exception.compareAndSet(null, e);
-	cancellationRequested.compareAndSet(false, true);
+  private static final class BatchProcessingException extends RuntimeException {
+
+	private BatchProcessingException(Throwable cause) {
+	  super(cause);
+	}
   }
 
 }

@@ -330,22 +330,41 @@ enum Utils {
   }
 
   static Object proxy(Object stream) {
+	return proxy(stream, () -> {}, () -> {});
+  }
+
+  static Object proxy(Object stream, Runnable onSuccess, Runnable onFailure) {
+	return proxy(stream, onSuccess, onFailure, () -> {});
+  }
+
+  static Object proxy(Object stream, Runnable onSuccess, Runnable onFailure, Runnable onUnordered) {
 	return proxy(stream, getAllInterfaces(stream.getClass()), (instance, proxy, method, args) -> {
 	  if (BaseStream.class.equals(method.getDeclaringClass())) {
 		if (!BaseStream.class.isAssignableFrom(method.getReturnType())) {
 		  if ("iterator".equals(method.getName()) || "spliterator".equals(method.getName()))
 			throw new UnsupportedOperationException(EXCEPTION_MESSAGE);
+		  if ("close".equals(method.getName())) onSuccess.run();
 		  return method.invoke(instance, args);
-		} else return proxy(method.invoke(instance, args));
+		} else {
+		  if ("unordered".equals(method.getName())) onUnordered.run();
+		  return proxy(method.invoke(instance, args), onSuccess, onFailure, onUnordered);
+		}
 	  }
 	  if (BaseStream.class.isAssignableFrom(method.getDeclaringClass())) {
 		if (!BaseStream.class.isAssignableFrom(method.getReturnType())) {
 		  try (AutoCloseable proxied = (BaseStream<?, ?>) instance) {
-			return method.invoke(proxied, args);
+			try {
+			  Object result = method.invoke(proxied, args);
+			  onSuccess.run();
+			  return result;
+			} catch (Throwable t) {
+			  onFailure.run();
+			  throw t;
+			}
 		  } catch (Throwable t) {
 			throw newSQLRuntimeException(t.getCause(), t);
 		  }
-		} else return proxy(method.invoke(instance, args));
+		} else return proxy(method.invoke(instance, args), onSuccess, onFailure, onUnordered);
 	  }
 	  return method.invoke(instance, args);
 	});

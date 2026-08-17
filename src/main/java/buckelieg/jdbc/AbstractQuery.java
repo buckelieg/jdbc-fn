@@ -15,7 +15,7 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TryBiConsumer;
 import buckelieg.fn.TryRunnable;
 import buckelieg.fn.TrySupplier;
 
@@ -24,6 +24,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -37,7 +38,7 @@ abstract class AbstractQuery<Q extends Query<Q>, S extends Statement> implements
   protected S statement;
   protected final String query;
   protected final TrySupplier<Connection, SQLException> connectionSupplier;
-  private final TryConsumer<Connection, ? extends Throwable> connectionConsumer;
+  private final TryBiConsumer<Connection, Boolean, ? extends Throwable> connectionConsumer;
   protected final ExecutorService executorService;
   protected boolean skipWarnings = true;
   protected final boolean isPrepared;
@@ -50,9 +51,11 @@ abstract class AbstractQuery<Q extends Query<Q>, S extends Statement> implements
   protected final Object[] params;
   private final AtomicReference<Connection> connectionInUse = new AtomicReference<>();
 
+  private final AtomicBoolean successful = new AtomicBoolean();
+
   AbstractQuery(
 		  TrySupplier<Connection, SQLException> connectionSupplier,
-		  TryConsumer<Connection, ? extends Throwable> connectionConsumer,
+		  TryBiConsumer<Connection, Boolean, ? extends Throwable> connectionConsumer,
 		  ExecutorService executorService,
 		  String query, Object... params) {
 	this.query = query;
@@ -69,16 +72,28 @@ abstract class AbstractQuery<Q extends Query<Q>, S extends Statement> implements
 		statement.close(); // by JDBC spec: subsequently closes all result sets opened by this statement
 	  }
 	} catch (SQLException e) {
+	  markFailed();
 	  throw newSQLRuntimeException(e);
+	} catch (RuntimeException e) {
+	  markFailed();
+	  throw e;
 	} finally {
 	  if (null != connectionConsumer) {
 		try {
-		  connectionConsumer.accept(connectionInUse.getAndSet(null));
+		  connectionConsumer.accept(connectionInUse.getAndSet(null), successful.get());
 		} catch (Throwable e) {
 		  throw newSQLRuntimeException(e);
 		}
 	  }
 	}
+  }
+
+  final void markSuccessful() {
+	successful.set(true);
+  }
+
+  final void markFailed() {
+	successful.set(false);
   }
 
   final void setQueryBasicParameters(S statement) throws SQLException {
@@ -149,6 +164,7 @@ abstract class AbstractQuery<Q extends Query<Q>, S extends Statement> implements
 	return connectionInUse.updateAndGet(connection -> {
 	  if (null == connection) {
 		try {
+		  markFailed();
 		  connection = connectionSupplier.get();
 		} catch (SQLException e) {
 		  throw Utils.newSQLRuntimeException(e);

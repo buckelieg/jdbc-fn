@@ -15,7 +15,7 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TryBiConsumer;
 import buckelieg.fn.TryFunction;
 import buckelieg.fn.TrySupplier;
 
@@ -40,10 +40,21 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
   StoredProcedureQuery(
 		  Map<String, MetadataImpl.Column> metaCache,
 		  TrySupplier<Connection, SQLException> connectionSupplier,
-		  TryConsumer<Connection, ? extends Throwable> connectionConsumer,
+		  TryBiConsumer<Connection, Boolean, ? extends Throwable> connectionConsumer,
+		  TrySupplier<Connection, SQLException> processingConnectionSupplier,
+		  TryBiConsumer<Connection, Boolean, ? extends Throwable> processingConnectionCloser,
 		  ExecutorService executorService,
 		  String query, P<?>... params) {
-	super(metaCache, connectionSupplier, connectionConsumer, executorService, query, (Object[]) params);
+	super(
+			metaCache,
+			connectionSupplier,
+			connectionConsumer,
+			processingConnectionSupplier,
+			processingConnectionCloser,
+			executorService,
+			query,
+			(Object[]) params
+	);
   }
 
   @Override
@@ -54,7 +65,7 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
 	  if (mapper != null && consumer != null && isPrepared) {
 		try {
 		  consumer.accept(mapper.apply(ValueGetters.reader(
-				  new MetadataImpl(getConnection()::getMetaData, ((CallableStatement) statement)::getMetaData, metaCache),
+				  new MetadataImpl(null, ((CallableStatement) statement)::getMetaData, metaCache).snapshot(),
 				  (CallableStatement) statement
 		  )));
 		} catch (SQLException e) {
@@ -63,6 +74,12 @@ final class StoredProcedureQuery extends SelectQuery implements StoredProcedure 
 	  }
 	};
 	return this;
+  }
+
+  @Override
+  protected MetadataImpl preloadMetadata(Statement statement) {
+	// Stored procedures can be stateful and must never be executed a second time as a metadata probe.
+	return null;
   }
 
   @Override

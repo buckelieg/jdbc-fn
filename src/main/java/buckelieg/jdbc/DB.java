@@ -49,6 +49,21 @@ public final class DB extends Session {
 
 	private Supplier<String> txIdProvider = () -> UUID.randomUUID().toString();
 
+	private Integer maxConnections;
+
+	/**
+	 * Configures the maximum number of connections managed by this database
+	 * facade. This limit is independent of any pool limit configured on an
+	 * externally supplied {@link DataSource}.
+	 *
+	 * @param count maximum number of connections; values below one become one
+	 * @return this builder
+	 */
+	public Builder withMaxConnections(int count) {
+	  this.maxConnections = Math.max(1, count);
+	  return this;
+	}
+
 	/**
 	 * Configures a {@linkplain DB} instance with executor service provided<br/>
 	 * Default is {@linkplain Executors#newWorkStealingPool()}
@@ -92,15 +107,15 @@ public final class DB extends Session {
 	 * Builds a new <code>DB</code> instance with provided connection supplier function<br/>
 	 * Example:
 	 * <pre>{@code
-	 * DataSource ds = // obtain datasource instance (via JNDI, DriverManager etc.)
-	 * DB db = DB.builder().build(ds::getConnection);
-	 * // or
-	 * DB db = DB.builder.build(() -> DriverManager.getConnection("jdbcURL"))
+	 * DB db = DB.builder().build(driverManager -> driverManager
+	 *     .withUser("user")
+	 *     .withPassword("password")
+	 *     .build("jdbc:vendor:database"));
 	 * }</pre>
 	 *
-	 * @param configurator a function that configures a connection to database
+	 * @param configurator a function that configures the DriverManager-backed data source
 	 * @return a new {@linkplain DB} instance. Never null
-	 * @throws NullPointerException if {@code connectionProvider} is null
+	 * @throws NullPointerException if {@code configurator} is null
 	 */
 	public DB build(Consumer<DriverManagerDataSourceBuilder> configurator) {
 	  DriverManagerDataSourceBuilder ds = new DriverManagerDataSourceBuilder();
@@ -110,7 +125,7 @@ public final class DB extends Session {
 			  () -> requireNonNull(txIdProvider.get(), "Transaction ID must not be null"),
 			  new DefaultConnectionManager(
 					  ds::getConnection,
-					  ds.getMaxConnections(),
+					  null == maxConnections ? ds.getMaxConnections() : maxConnections,
 					  ds.getKeepAliveDuration(),
 					  ds.getKeepAliveQuery(),
 					  ds.getKeepAliveDuration()
@@ -119,6 +134,72 @@ public final class DB extends Session {
 			  terminateExecutorService,
 			  true
 	  );
+	}
+
+	/**
+	 * Builds a database facade from a connection provider. Connections supplied
+	 * through this overload are managed by jdbc-fn's internal pool and are
+	 * closed when this database facade is closed.
+	 * <p>
+	 * Vendor-specific streaming is selected lazily from metadata on an acquired
+	 * connection, so the provider does not need to expose its JDBC URL.
+	 *
+	 * @param connectionProvider provider of new or externally pooled connections
+	 * @return a configured database facade
+	 * @throws NullPointerException if {@code connectionProvider} is null
+	 */
+	public DB build(TrySupplier<Connection, SQLException> connectionProvider) {
+	  TrySupplier<Connection, SQLException> provider = requireNonNull(
+			  connectionProvider,
+			  "Connection provider must be provided"
+	  );
+	  return new DB(
+			  new ConcurrentHashMap<>(),
+			  () -> requireNonNull(txIdProvider.get(), "Transaction ID must not be null"),
+			  new DefaultConnectionManager(
+					  provider,
+					  null == maxConnections ? Runtime.getRuntime().availableProcessors() : maxConnections,
+					  Duration.ofSeconds(10),
+					  null,
+					  Duration.ofSeconds(10)
+			  ),
+			  executorService,
+			  terminateExecutorService,
+			  true
+	  );
+	}
+
+	/**
+	 * Builds a database facade backed by an externally managed {@link DataSource}.
+	 * The data source does not need to expose its JDBC URL: vendor-specific
+	 * streaming is selected lazily from {@link java.sql.DatabaseMetaData} on an
+	 * acquired connection.
+	 *
+	 * @param dataSource data source supplying database connections
+	 * @return a configured database facade
+	 * @throws NullPointerException if {@code dataSource} is null
+	 */
+	public DB build(DataSource dataSource) {
+	  try {
+		DataSource source = requireNonNull(dataSource, "Data source must be provided");
+		Duration timeout = Duration.ofSeconds(source.getLoginTimeout());
+		return new DB(
+				new ConcurrentHashMap<>(),
+				() -> requireNonNull(txIdProvider.get(), "Transaction ID must not be null"),
+				new DefaultConnectionManager(
+						source::getConnection,
+						null == maxConnections ? Runtime.getRuntime().availableProcessors() : maxConnections,
+						timeout,
+						null,
+						timeout
+				),
+				executorService,
+				terminateExecutorService,
+				false
+		);
+	  } catch (SQLException e) {
+		throw newSQLRuntimeException(e);
+	  }
 	}
 
   }
@@ -186,7 +267,14 @@ public final class DB extends Session {
    * @return a transaction instance
    */
   public Transaction transaction() {
-	return new JDBCTransaction(executorService, txIdProvider, metaCache, connectionManager::getConnection, connectionManager::close);
+	return new JDBCTransaction(
+			executorService,
+			txIdProvider,
+			metaCache,
+			connectionManager::getConnection,
+			connectionManager::close,
+			connectionManager::close
+	);
   }
 
   /**

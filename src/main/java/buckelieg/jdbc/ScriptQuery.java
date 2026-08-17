@@ -15,7 +15,7 @@
  */
 package buckelieg.jdbc;
 
-import buckelieg.fn.TryConsumer;
+import buckelieg.fn.TryBiConsumer;
 import buckelieg.fn.TrySupplier;
 
 import java.sql.Connection;
@@ -31,6 +31,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.StreamSupport;
 
@@ -54,7 +55,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
 
   private final TrySupplier<Connection, SQLException> connectionSupplier;
 
-  private final TryConsumer<Connection, ? extends Throwable> connectionConsumer;
+  private final TryBiConsumer<Connection, Boolean, ? extends Throwable> connectionConsumer;
 
   private final ExecutorService executorService;
 
@@ -69,6 +70,8 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
   private boolean poolable;
   private Connection connectionInUse;
 
+  private final AtomicBoolean rollbackOnly = new AtomicBoolean();
+
   /**
    * Creates script executor query
    *
@@ -78,7 +81,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
    */
   ScriptQuery(
 		  TrySupplier<Connection, SQLException> connectionSupplier,
-		  TryConsumer<Connection, ? extends Throwable> connectionConsumer,
+		  TryBiConsumer<Connection, Boolean, ? extends Throwable> connectionConsumer,
 		  ExecutorService executorService,
 		  String script,
 		  Iterable<T> namedParams) {
@@ -98,6 +101,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
    */
   @Override
   public Long execute() {
+	rollbackOnly.set(false);
 	TrySupplier<Long, SQLException> execute = () -> {
 	  connectionInUse = connectionSupplier.get();
 	  return doExecute(connectionInUse);
@@ -110,11 +114,14 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
 		return task.get(timeout, unit);
 	  }
 	} catch (SQLException e) {
+	  rollbackOnly.set(true);
 	  throw newSQLRuntimeException(e);
 	} catch (InterruptedException e) {
+	  rollbackOnly.set(true);
 	  Thread.currentThread().interrupt();
 	  throw new RuntimeException(e);
 	} catch (ExecutionException | TimeoutException e) {
+	  rollbackOnly.set(true);
 	  if (null != task) task.cancel(true);
 	  throw newSQLRuntimeException(e);
 	}
@@ -123,6 +130,7 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
   private long doExecute(Connection connection) throws SQLException {
 	long start = currentTimeMillis();
 	boolean isWarnings = false;
+	boolean successful = false;
 	Statement statement = null;
 	try {
 	  for (String query : script.split(STATEMENT_DELIMITER)) {
@@ -160,8 +168,9 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
 		  if (statement != null) statement.close();
 		}
 	  }
+	  successful = true;
 	} finally {
-	  close();
+	  close(successful && !rollbackOnly.get());
 	}
 	return currentTimeMillis() - start;
   }
@@ -226,11 +235,13 @@ final class ScriptQuery<T extends Map.Entry<String, ?>> implements Script {
 	});
   }
 
-  void close() {
+  void close(boolean successful) {
 	try {
-	  if (null != connectionConsumer) connectionConsumer.accept(connectionInUse);
+	  if (null != connectionConsumer) connectionConsumer.accept(connectionInUse, successful);
 	} catch (Throwable e) {
 	  throw newSQLRuntimeException(e);
+	} finally {
+	  connectionInUse = null;
 	}
   }
 }

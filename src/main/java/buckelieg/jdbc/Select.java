@@ -39,12 +39,30 @@ import static java.util.Optional.ofNullable;
 @SuppressWarnings("unchecked")
 public interface Select extends Query<Select> {
 
+  /** Controls whether bounded-memory result streaming is required. */
+  enum Streaming {
+	/** Fail before execution when the JDBC driver has no verified streaming strategy. */
+	REQUIRED,
+	/** Apply the standard forward-only/fetch-size hints for an unknown driver. */
+	PREFERRED,
+	/** Allow the JDBC driver to buffer the complete result. */
+	BUFFERED
+  }
+
   /**
-   * The N+1 problem resolution.
-   * <br/>Represents a {@code Select} statement which results will be processed in batch mode
-   *
-   * @param <T> a type of processed entity
-   */
+	 * The N+1 problem resolution.
+	 * <br/>Represents a {@code Select} statement which results will be processed in batch mode
+	 * <p>Rows are fetched sequentially from the source cursor and materialized batches may be processed
+	 * concurrently. A supplied session lazily obtains a separate connection and is committed or rolled
+	 * back as one transaction per batch. It must not be retained or used asynchronously after the
+	 * processor returns. A processor which executes SQL therefore requires up to one pool connection per
+	 * concurrent batch in addition to the source cursor connection. Independent batch transactions may
+	 * commit in a different order from the source rows. The returned stream emits batches in source order
+	 * unless {@link Stream#unordered()} is requested, in which case batches are emitted as their processors
+	 * complete.</p>
+	 *
+	 * @param <T> a type of processed entity
+	 */
   interface ForBatch<T> {
 
 	/**
@@ -55,6 +73,15 @@ public interface Select extends Query<Select> {
 	 * @return select for batch processing query abstraction
 	 */
 	ForBatch<T> size(int batchSize);
+
+	/**
+	 * Limits the number of batches processed concurrently. The default is the number of available
+	 * processors reported by the runtime.
+	 *
+	 * @param concurrency maximum number of concurrent batch processors
+	 * @return select for batch processing query abstraction
+	 */
+	ForBatch<T> concurrency(int concurrency);
 
 	/**
 	 * Executes this SELECT statement applying a {@code batchProcessor} function to each chunk<br/>
@@ -93,7 +120,7 @@ public interface Select extends Query<Select> {
 	 * <tr>
 	 * <td>session</td>
 	 * <td>{@linkplain Session}</td>
-	 * <td>a query session bound to this implicitly created transaction</td>
+	 * <td>a query session bound to a separate transaction for the current batch</td>
 	 * </tr>
 	 * </table>
 	 *
@@ -122,7 +149,7 @@ public interface Select extends Query<Select> {
 	 * <tr>
 	 * <td>session</td>
 	 * <td>{@linkplain Session}</td>
-	 * <td>a query session bound to this implicitly created transaction</td>
+	 * <td>a query session bound to a separate transaction for the current batch</td>
 	 * </tr>
 	 * <tr>
 	 * <td>index</td>
@@ -325,6 +352,14 @@ public interface Select extends Query<Select> {
    * @see ResultSet#setFetchSize(int)
    */
   Select fetchSize(int size);
+
+  /**
+   * Configures the result streaming guarantee. The default is {@link Streaming#REQUIRED}.
+   *
+   * @param streaming requested streaming guarantee
+   * @return select query abstraction
+   */
+  Select streaming(Streaming streaming);
 
   /**
    * Updates max rows obtained with this query

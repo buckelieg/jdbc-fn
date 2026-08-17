@@ -577,7 +577,7 @@ public class DBTests {
 
   @Test
   public void testDeadlocksMultiConnectionSupplierMaxConnections1() throws Exception {
-	DB db1 = DB.create(ds);
+	DB db1 = DB.builder().withMaxConnections(1).build(ds);
 	assertNotEquals(db1, db);
 	Assertions.assertThrows(
 			AssertionFailedError.class,
@@ -618,6 +618,18 @@ public class DBTests {
 			)
 	);
 	db1.close();
+  }
+
+  @Test
+  public void testConnectionProviderBuilder() {
+	DB db1 = DB.builder()
+			.withMaxConnections(2)
+			.build(ds::getConnection);
+	try {
+	  assertEquals(Long.valueOf(10L), db1.select("SELECT COUNT(*) FROM TEST").single(rs -> rs.getLong(1)).orElse(null));
+	} finally {
+	  db1.close();
+	}
   }
 
   @Test

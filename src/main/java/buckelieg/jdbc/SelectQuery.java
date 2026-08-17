@@ -15,8 +15,8 @@
  */
 package buckelieg.jdbc;
 
+import buckelieg.fn.TryBiConsumer;
 import buckelieg.fn.TryBiFunction;
-import buckelieg.fn.TryConsumer;
 import buckelieg.fn.TrySupplier;
 import buckelieg.fn.TryTriConsumer;
 
@@ -38,12 +38,16 @@ import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static buckelieg.jdbc.Utils.proxy;
 import static buckelieg.jdbc.Utils.setStatementParameters;
 import static java.lang.Math.max;
-import static java.sql.ResultSet.FETCH_FORWARD;
+import static java.util.Objects.requireNonNull;
 
 @SuppressWarnings("SqlSourceToSinkFlow")
 class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
 
   protected final Map<String, MetadataImpl.Column> metaCache;
+
+  final TrySupplier<Connection, SQLException> processingConnectionSupplier;
+
+  final TryBiConsumer<Connection, Boolean, ? extends Throwable> processingConnectionCloser;
 
   protected AtomicInteger currentResultSetNumber = new AtomicInteger();
 
@@ -53,20 +57,37 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
 
   int fetchSize = 15;
 
+  private Streaming streaming = Streaming.REQUIRED;
+
   private int maxRowsInt = -1;
 
   private long maxRowsLong = -1L;
 
   protected volatile Metadata meta;
 
+  private volatile StreamingStrategy streamingStrategy;
+
   SelectQuery(
 		  Map<String, MetadataImpl.Column> metaCache,
 		  TrySupplier<Connection, SQLException> connectionSupplier,
-		  TryConsumer<Connection, ? extends Throwable> connectionConsumer,
+		  TryBiConsumer<Connection, Boolean, ? extends Throwable> connectionConsumer,
+		  ExecutorService executorService,
+		  String query, Object... params) {
+	this(metaCache, connectionSupplier, connectionConsumer, connectionSupplier, connectionConsumer, executorService, query, params);
+  }
+
+  SelectQuery(
+		  Map<String, MetadataImpl.Column> metaCache,
+		  TrySupplier<Connection, SQLException> connectionSupplier,
+		  TryBiConsumer<Connection, Boolean, ? extends Throwable> connectionConsumer,
+		  TrySupplier<Connection, SQLException> processingConnectionSupplier,
+		  TryBiConsumer<Connection, Boolean, ? extends Throwable> processingConnectionCloser,
 		  ExecutorService executorService,
 		  String query, Object... params) {
 	super(connectionSupplier, connectionConsumer, executorService, query, params);
 	this.metaCache = metaCache;
+	this.processingConnectionSupplier = processingConnectionSupplier;
+	this.processingConnectionCloser = processingConnectionCloser;
   }
 
   @Override
@@ -75,6 +96,7 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
 	return new Select.ForBatch<T>() { // TODO keep ordering?
 
 	  int batchSize = fetchSize;
+	  int concurrency = BatchSpliterator.defaultConcurrency();
 
 	  @Override
 	  public ForBatch<T> size(int batchSize) {
@@ -82,12 +104,23 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
 		return this;
 	  }
 
+	  @Override
+	  public ForBatch<T> concurrency(int concurrency) {
+		this.concurrency = max(1, concurrency);
+		return this;
+	  }
+
 	  @SuppressWarnings("unchecked")
 	  @Override
 	  public Stream<T> execute(TryTriConsumer<List<T>, Session, Integer, ? extends Exception> batchProcessor) {
 		if (null == batchProcessor) throw new NullPointerException("Batch processor must be provided");
-		final BatchSpliterator<T> splIterator = new BatchSpliterator<>(SelectQuery.this, mapper, batchProcessor, batchSize <= 0 ? fetchSize : batchSize);
-		return (Stream<T>) proxy(StreamSupport.stream(splIterator, false).onClose(splIterator::close));
+		final BatchSpliterator<T> splIterator = new BatchSpliterator<>(SelectQuery.this, mapper, batchProcessor, batchSize <= 0 ? fetchSize : batchSize, concurrency);
+		return (Stream<T>) proxy(
+				StreamSupport.stream(splIterator, false).onClose(splIterator::close),
+				SelectQuery.this::markSuccessful,
+				SelectQuery.this::markFailed,
+				splIterator::unordered
+		);
 	  }
 	};
   }
@@ -95,14 +128,19 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
   @Override
   public <T> T forMeta(Function<Metadata, T> mapper) {
 	if (null == mapper) throw new NullPointerException("Mapper must be provided");
-	TrySupplier<ResultSetMetaData, SQLException> metadataSupplier;
 	try {
 	  statement = prepareStatement();
-	  if (!isPrepared) {
+	  MetadataImpl metadata = preloadMetadata(statement);
+	  if (null == metadata) {
 		resultSet = doExecute(statement);
-		metadataSupplier = null == resultSet ? null : resultSet::getMetaData;
-	  } else metadataSupplier = ((PreparedStatement) statement)::getMetaData;
-	  return mapper.apply(new MetadataImpl(getConnection()::getMetaData, metadataSupplier, metaCache));
+		metadata = null == resultSet
+				? new MetadataImpl(getConnection()::getMetaData, null, metaCache).snapshot()
+				: new MetadataImpl(null, resultSet::getMetaData, metaCache).snapshot();
+		if (null != resultSet) resultSet.close();
+	  }
+	  T result = mapper.apply(metadata);
+	  markSuccessful();
+	  return result;
 	} catch (SQLException e) {
 	  throw newSQLRuntimeException(e);
 	} finally {
@@ -114,17 +152,58 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
   @Override
   public final <T> Stream<T> execute(TryBiFunction<ValueReader, Integer, T, SQLException> mapper) {
 	if (null == mapper) throw new NullPointerException("Mapper must be provided");
-	return (Stream<T>) proxy(StreamSupport.stream(new SequentialSpliterator<>(SelectQuery.this, mapper), false).onClose(this::close));
+	return (Stream<T>) proxy(StreamSupport.stream(new SequentialSpliterator<>(SelectQuery.this, mapper), false).onClose(this::close), this::markSuccessful, this::markFailed);
   }
 
   protected ResultSet doExecute(Statement statement) throws SQLException {
 	configureStatement(statement);
-	return isPrepared ? ((PreparedStatement) statement).executeQuery() : statement.execute(query) ? statement.getResultSet() : null;
+	return statement instanceof PreparedStatement
+			? ((PreparedStatement) statement).executeQuery()
+			: statement.execute(query) ? statement.getResultSet() : null;
+  }
+
+  final boolean initializeResultSet() throws SQLException {
+	statement = prepareStatement();
+	preloadMetadata(statement);
+	resultSet = doExecute(statement);
+	if (null == resultSet) return false;
+
+	currentResultSetNumber.incrementAndGet();
+	meta = new MetadataImpl(null, resultSet::getMetaData, metaCache).snapshot();
+	wrapper = ValueGetters.reader(meta, resultSet);
+	return true;
+  }
+
+  protected MetadataImpl preloadMetadata(Statement statement) throws SQLException {
+	if (!(statement instanceof PreparedStatement)) return null;
+
+	ResultSetMetaData resultSetMetaData = ((PreparedStatement) statement).getMetaData();
+	MetadataImpl metadata;
+	if (null == resultSetMetaData) metadata = probeMetadata((PreparedStatement) statement);
+	else {
+	  final ResultSetMetaData preliminary = resultSetMetaData;
+	  metadata = new MetadataImpl(getConnection()::getMetaData, () -> preliminary, metaCache).snapshot();
+	}
+	return null == metadata ? null : metadata.preload();
+  }
+
+  private MetadataImpl probeMetadata(PreparedStatement statement) throws SQLException {
+	configureStatement(statement);
+	statement.setMaxRows(1);
+	try (ResultSet probe = statement.executeQuery()) {
+	  return null == probe ? null : new MetadataImpl(getConnection()::getMetaData, probe::getMetaData, metaCache).snapshot();
+	}
   }
 
   @Override
   public final Select fetchSize(int size) {
 	this.fetchSize = max(1, size);
+	return this;
+  }
+
+  @Override
+  public final Select streaming(Streaming streaming) {
+	this.streaming = requireNonNull(streaming, "Streaming mode must be provided");
 	return this;
   }
 
@@ -143,22 +222,24 @@ class SelectQuery extends AbstractQuery<Select, Statement> implements Select {
   }
 
   protected Statement prepareStatement() throws SQLException {
-	return isPrepared
-			? setStatementParameters(getConnection().prepareStatement(query, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY), params)
-			: getConnection().createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+	return setStatementParameters(
+			getConnection().prepareStatement(query, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY),
+			params
+	);
 
   }
 
   protected final void configureStatement(Statement statement) throws SQLException {
 	setQueryBasicParameters(statement);
-	if (fetchSize > 0) {
-	  accept(() -> {
-		statement.setFetchSize(fetchSize); // 0 value is ignored by Statement.setFetchSize;
-		statement.setFetchDirection(FETCH_FORWARD);
-	  });
-	}
+	accept(() -> strategy().configure(getConnection(), statement, fetchSize, streaming));
 	if (maxRowsInt != -1) accept(() -> statement.setMaxRows(maxRowsInt));
-	if (maxRowsLong != -1L) accept(() -> statement.setLargeMaxRows(maxRowsLong));
+	else if (maxRowsLong != -1L) accept(() -> statement.setLargeMaxRows(maxRowsLong));
+	else accept(() -> statement.setMaxRows(0));
+  }
+
+  private StreamingStrategy strategy() throws SQLException {
+	if (null == streamingStrategy) streamingStrategy = StreamingStrategy.resolve(getConnection());
+	return streamingStrategy;
   }
 
 }

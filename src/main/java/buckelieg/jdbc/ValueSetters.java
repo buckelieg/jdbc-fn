@@ -136,7 +136,7 @@ final class ValueSetters implements ValueWriter {
 
   private int indexOf(String name) throws SQLException {
 	ResultSetMetaData meta = meta();
-	for (int index = 0; index < meta.getColumnCount(); index++)
+	for (int index = 1; index <= meta.getColumnCount(); index++)
 	  if (name.equalsIgnoreCase(meta.getColumnName(index))) return index;
 	return -1;
   }

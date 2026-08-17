@@ -31,9 +31,10 @@ public final class DriverManagerDataSourceBuilder {
 	}
 
 	/**
-	 * Sets keep alive query to execute against connection to test its liveness
+	 * Sets a side-effect-free keep alive query to execute against an idle pooled connection to test its liveness.
+	 * The query runs in the connection's current transaction mode and therefore must not contain DML or DDL.
 	 *
-	 * @param testQuery a valid SQL query to run on connection
+	 * @param testQuery a side-effect-free SQL query, for example {@code SELECT 1}
 	 */
 	public void setKeepAliveQuery(String testQuery) {
 	  builder.keepAliveQuery = testQuery;

@@ -27,13 +27,15 @@ import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static buckelieg.jdbc.Utils.listResultSet;
 import static buckelieg.jdbc.Utils.newSQLRuntimeException;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
@@ -44,10 +46,7 @@ final class MetadataImpl implements Metadata {
   private static final String PK_TABLE_CATALOG = "PKTABLE_CAT";
   private static final String PK_TABLE_SCHEMA = "PKTABLE_SCHEM";
   private static final String PK_TABLE_NAME = "PKTABLE_NAME";
-  private static final String PK_COLUMN_NAME = "PKCOLUMN_NAME";
   private static final String FK_COLUMN_NAME = "FKCOLUMN_NAME";
-  private static final String NULLABLE = "NULLABLE";
-  private static final String DATA_TYPE = "DATA_TYPE";
   private static final String COLUMN_NAME = "COLUMN_NAME";
 
   static final class Table {
@@ -107,6 +106,7 @@ final class MetadataImpl implements Metadata {
 		List<Column> buffer = new ArrayList<>();
 		try {
 		  ResultSetMetaData meta = rsMeta.get();
+		  if (null == meta) return Collections.emptyList();
 		  for (int columnIndex = 1; columnIndex <= meta.getColumnCount(); columnIndex++)
 			buffer.add(createColumn(columnIndex, meta));
 		} catch (Exception e) {
@@ -115,6 +115,83 @@ final class MetadataImpl implements Metadata {
 		columns = buffer;
 	  }
 	  return columns;
+	});
+  }
+
+  MetadataImpl snapshot() {
+	getColumns();
+	return this;
+  }
+
+  MetadataImpl preload() {
+	List<Column> resultColumns = getColumns();
+	if (null == dbMeta || resultColumns.isEmpty()) return this;
+
+	Map<String, List<Column>> columnsByTable = new HashMap<>();
+	for (Column column : resultColumns) {
+	  if (null == column.ownTable || null == column.ownTable.name || column.ownTable.name.trim().isEmpty()) {
+		cache(column, false, false, null);
+		continue;
+	  }
+	  columnsByTable.computeIfAbsent(column.ownTable.toString(), ignored -> new ArrayList<>()).add(column);
+	}
+
+	try {
+	  DatabaseMetaData databaseMetaData = dbMeta.get();
+	  for (List<Column> tableColumns : columnsByTable.values()) {
+		if (!tableColumns.stream().allMatch(this::hasSchemaMetadata)) preload(databaseMetaData, tableColumns);
+	  }
+	  return this;
+	} catch (Exception e) {
+	  throw newSQLRuntimeException(e);
+	}
+  }
+
+  private boolean hasSchemaMetadata(Column column) {
+	Column cached = columnsCache.get(column.toString());
+	return null != cached && null != cached.pk && null != cached.fk;
+  }
+
+  private void preload(DatabaseMetaData databaseMetaData, List<Column> tableColumns) throws SQLException {
+	Column sample = tableColumns.get(0);
+	Set<String> primaryKeys = new HashSet<>();
+	Map<String, Table> referencedTables = new HashMap<>();
+
+	try (java.sql.ResultSet resultSet = databaseMetaData.getPrimaryKeys(
+			sample.ownTable.catalog,
+			sample.ownTable.schema,
+			sample.ownTable.name
+	)) {
+	  while (resultSet.next()) primaryKeys.add(resultSet.getString(COLUMN_NAME).toUpperCase(Locale.ROOT));
+	}
+
+	try (java.sql.ResultSet resultSet = databaseMetaData.getImportedKeys(
+			sample.ownTable.catalog,
+			sample.ownTable.schema,
+			sample.ownTable.name
+	)) {
+	  while (resultSet.next()) {
+		Table referencedTable = new Table();
+		referencedTable.catalog = resultSet.getString(PK_TABLE_CATALOG);
+		referencedTable.schema = resultSet.getString(PK_TABLE_SCHEMA);
+		referencedTable.name = resultSet.getString(PK_TABLE_NAME);
+		referencedTables.put(resultSet.getString(FK_COLUMN_NAME).toUpperCase(Locale.ROOT), referencedTable);
+	  }
+	}
+
+	for (Column column : tableColumns) {
+	  String columnName = column.name.toUpperCase(Locale.ROOT);
+	  cache(column, primaryKeys.contains(columnName), referencedTables.containsKey(columnName), referencedTables.get(columnName));
+	}
+  }
+
+  private void cache(Column column, boolean primaryKey, boolean foreignKey, Table referencedTable) {
+	columnsCache.compute(column.toString(), (ignored, cached) -> {
+	  Column target = null == cached ? column : cached;
+	  target.pk = primaryKey;
+	  target.fk = foreignKey;
+	  target.refTable = referencedTable;
+	  return target;
 	});
   }
 
@@ -135,61 +212,25 @@ final class MetadataImpl implements Metadata {
 
   boolean isPrimaryKey(Column column) {
 	return enrichColumn(column, c -> {
-	  if (null == c.pk)
-		c.pk = listResultSet(
-				dbMeta.get().getPrimaryKeys(column.ownTable.catalog, column.ownTable.schema, column.ownTable.name),
-				rs -> rs.getString(COLUMN_NAME)
-		).stream().anyMatch(name -> column.name.equalsIgnoreCase(name));
+	  if (null == c.pk) c.pk = false;
 	}).pk;
   }
 
   boolean isForeignKey(Column column) {
 	return enrichColumn(column, c -> {
-	  if (null == c.fk) {
-		c.fk = listResultSet(
-				dbMeta.get().getImportedKeys(column.ownTable.catalog, column.ownTable.schema, column.ownTable.name),
-				rs -> {
-				  Map<String, String> map = new HashMap<>();
-				  map.put(PK_TABLE_CATALOG, rs.getString(PK_TABLE_CATALOG));
-				  map.put(PK_TABLE_SCHEMA, rs.getString(PK_TABLE_SCHEMA));
-				  map.put(PK_TABLE_NAME, rs.getString(PK_TABLE_NAME));
-				  map.put(PK_COLUMN_NAME, rs.getString(PK_COLUMN_NAME));
-				  map.put(FK_COLUMN_NAME, rs.getString(FK_COLUMN_NAME));
-				  return map;
-				})
-				.stream()
-				.filter(map -> column.name.equalsIgnoreCase(map.get(FK_COLUMN_NAME)))
-				.findFirst()
-				.map(map -> {
-				  c.fk = true;
-				  c.refTable = new Table();
-				  c.refTable.catalog = map.get(PK_TABLE_CATALOG);
-				  c.refTable.schema = map.get(PK_TABLE_SCHEMA);
-				  c.refTable.name = map.get(PK_TABLE_NAME);
-				  return c.fk;
-				})
-				.orElse(false);
-	  }
+	  if (null == c.fk) c.fk = false;
 	}).fk;
   }
 
   boolean isNullable(Column column) {
 	return enrichColumn(column, c -> {
-	  if (null == c.nullable)
-		c.nullable = listResultSet(
-				dbMeta.get().getColumns(column.ownTable.catalog, column.ownTable.schema, column.ownTable.name, column.name),
-				rs -> rs.getInt(NULLABLE)
-		).stream().anyMatch(mode -> mode == DatabaseMetaData.columnNullable);
+	  if (null == c.nullable) c.nullable = false;
 	}).nullable;
   }
 
   SQLType getSQLType(Column column) {
 	return enrichColumn(column, c -> {
-	  if (null == c.sqlType)
-		c.sqlType = JDBCType.valueOf(listResultSet(
-				dbMeta.get().getColumns(column.ownTable.catalog, column.ownTable.schema, column.ownTable.name, column.name),
-				rs -> rs.getInt(DATA_TYPE)
-		).stream().findFirst().orElse(Types.OTHER));
+	  if (null == c.sqlType) c.sqlType = JDBCType.valueOf(Types.OTHER);
 	}).sqlType;
   }
 
